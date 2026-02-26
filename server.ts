@@ -2,6 +2,7 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
@@ -21,6 +22,9 @@ const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || "";
 
 // ─── Database ──────────────────────────────────────────────────────────────────
 const DB_PATH = process.env.DB_PATH || "music.db";
+// Ensure parent directory exists (critical for Railway /data volume mount)
+const DB_DIR = path.dirname(path.resolve(DB_PATH));
+if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 const db = new Database(DB_PATH);
 db.exec(`
   CREATE TABLE IF NOT EXISTS songs (
@@ -86,7 +90,7 @@ function sSEHeaders(res: any) {
 /** Run yt-dlp and get JSON info for a single video */
 async function ytInfo(videoId: string): Promise<any> {
   const { stdout } = await execAsync(
-    `yt-dlp -j --no-playlist "https://www.youtube.com/watch?v=${videoId}"`,
+    `yt-dlp -j --no-playlist --no-check-certificates "https://www.youtube.com/watch?v=${videoId}"`,
     { timeout: 30000 }
   );
   return JSON.parse(stdout);
@@ -96,8 +100,8 @@ async function ytInfo(videoId: string): Promise<any> {
 async function ytSearch(query: string): Promise<string | null> {
   try {
     const { stdout } = await execAsync(
-      `yt-dlp "ytsearch1:${query.replace(/"/g, '')}" --get-id --no-playlist`,
-      { timeout: 20000 }
+      `yt-dlp "ytsearch1:${query.replace(/"/g, '')}" --get-id --no-playlist --no-check-certificates`,
+      { timeout: 30000 }
     );
     return stdout.trim().split("\n")[0] || null;
   } catch { return null; }
@@ -230,7 +234,7 @@ async function startServer() {
     // requests (which browsers require for seeking in <audio>).
     const ytdlp = spawn("yt-dlp", [
       "-f", "bestaudio[ext=m4a]/bestaudio/best",
-      "--no-playlist", "-o", "-",
+      "--no-playlist", "--no-check-certificates", "-o", "-",
       `https://www.youtube.com/watch?v=${videoId}`,
     ]);
 
@@ -286,7 +290,7 @@ async function startServer() {
       let ytdlpOut: string;
       try {
         const result = await execAsync(
-          `yt-dlp --flat-playlist --dump-single-json --no-warnings "${playlistUrl}"`,
+          `yt-dlp --flat-playlist --dump-single-json --no-warnings --no-check-certificates "${playlistUrl}"`,
           { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
         );
         ytdlpOut = result.stdout;

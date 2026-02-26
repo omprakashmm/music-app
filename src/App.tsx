@@ -710,24 +710,30 @@ function HomeView({ onPlaySong, onProfileClick, songs, onAddSong, onDeleteSong }
   return (
     <div className="space-y-8">
       <header className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+        {/* Brand */}
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-900/40 shrink-0">
+            <Music2 size={18} className="text-black" />
+          </div>
+          <div>
+            <h1 className="text-lg font-black tracking-tight leading-tight">SonicStream</h1>
+            <p className="text-[11px] text-zinc-500 font-medium leading-tight">{getGreeting()}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onAddSong}
+            className="flex items-center gap-1.5 bg-emerald-500 text-black px-3.5 py-2 rounded-full text-xs font-bold hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-900/30"
+          >
+            <Plus size={14} /> Add Song
+          </button>
           <button
             onClick={onProfileClick}
-            className="w-9 h-9 rounded-full overflow-hidden border border-white/10 shrink-0"
+            className="w-9 h-9 rounded-full overflow-hidden border-2 border-emerald-500/30 hover:border-emerald-500/60 transition-colors shrink-0"
           >
             <img src="https://picsum.photos/seed/user/100/100" alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
           </button>
-          <div>
-            <p className="text-xs text-zinc-500 font-medium">{getGreeting()}</p>
-            <h1 className="text-xl font-black tracking-tight leading-tight">Your Music</h1>
-          </div>
         </div>
-        <button
-          onClick={onAddSong}
-          className="flex items-center gap-1.5 bg-emerald-500 text-black px-3.5 py-2 rounded-full text-xs font-bold hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-900/30"
-        >
-          <Plus size={14} /> Add Song
-        </button>
       </header>
 
       {songs.length === 0 ? (
@@ -2417,6 +2423,8 @@ function Sidebar({ activeView, onNavigate, onClose, onImport, onProfile, songs, 
                   ? 'bg-emerald-500/12 text-emerald-400 border-l-2 border-emerald-500'
                   : 'text-zinc-400 hover:bg-white/6 hover:text-white border-l-2 border-transparent'
               }`}>
+              <span className="shrink-0">{icon}</span>
+              <span>{label}</span>
             </button>
           ))}
         </div>

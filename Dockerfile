@@ -34,4 +34,4 @@ ENV NODE_ENV=production
 ENV DB_PATH=/data/music.db
 EXPOSE 3000
 
-CMD ["npx", "tsx", "server.ts"]
+CMD ["sh", "-c", "yt-dlp -U --no-check-certificates 2>/dev/null || true && npx tsx server.ts"]
