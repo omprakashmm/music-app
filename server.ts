@@ -108,29 +108,37 @@ async function ytSearch(query: string): Promise<string | null> {
 }
 
 /** Fetch a URL with curl (avoids Node.js TLS issues on cloud) */
-async function curlJson(url: string): Promise<any> {
+async function curlJson(url: string, timeoutSec = 15): Promise<any> {
   const { stdout } = await execAsync(
-    `curl -s -L --max-time 12 --retry 1 -A "Mozilla/5.0" "${url}"`,
-    { timeout: 20000 }
+    `curl -s -L --max-time ${timeoutSec} --retry 0 --insecure -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" "${url}"`,
+    { timeout: (timeoutSec + 5) * 1000 }
   );
-  return JSON.parse(stdout.trim());
+  const trimmed = stdout.trim();
+  if (!trimmed || trimmed[0] !== '{' && trimmed[0] !== '[') throw new Error("Not JSON: " + trimmed.slice(0, 80));
+  return JSON.parse(trimmed);
 }
 
 /** Fetch playlist via public Invidious instances (no bot-blocking, cloud-safe) */
 async function invidiousFetchPlaylist(playlistId: string): Promise<{ videoId: string; title: string; channel: string }[]> {
+  // Maintained list: https://api.invidious.io/instances.json
   const INSTANCES = [
-    "https://invidious.privacydev.net",
     "https://inv.nadeko.net",
+    "https://invidious.privacydev.net",
+    "https://invidious.epicsite.xyz",
     "https://iv.ggtyler.dev",
     "https://invidious.nikkosphere.com",
     "https://yt.artemislena.eu",
+    "https://invidious.perennialte.ch",
+    "https://invidious.fdn.fr",
+    "https://invidious.slipfox.xyz",
   ];
+  const errors: string[] = [];
   for (const base of INSTANCES) {
     try {
       const videos: any[] = [];
       let page = 1;
       while (true) {
-        const data = await curlJson(`${base}/api/v1/playlists/${playlistId}?page=${page}`);
+        const data = await curlJson(`${base}/api/v1/playlists/${playlistId}?page=${page}`, 12);
         if (!data || data.error || !Array.isArray(data.videos) || data.videos.length === 0) break;
         videos.push(...data.videos);
         const total: number = data.videoCount || videos.length;
@@ -138,15 +146,21 @@ async function invidiousFetchPlaylist(playlistId: string): Promise<{ videoId: st
         page++;
       }
       if (videos.length > 0) {
+        console.log(`✅ Invidious: got ${videos.length} videos from ${base}`);
         return videos.map(v => ({
           videoId: v.videoId,
           title: v.title || "Unknown",
           channel: v.author || "Unknown Artist",
         }));
       }
-    } catch { continue; }
+      errors.push(`${base}: empty response`);
+    } catch (e: any) {
+      errors.push(`${base}: ${e.message?.slice(0, 60)}`);
+      console.warn(`⚠️  Invidious ${base} failed:`, e.message?.slice(0, 80));
+      continue;
+    }
   }
-  throw new Error("All Invidious instances failed");
+  throw new Error("All Invidious instances failed. Errors: " + errors.slice(0, 3).join(" | "));
 }
 
 /** Save a song to DB (returns the saved song row) */
