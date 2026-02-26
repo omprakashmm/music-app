@@ -546,6 +546,9 @@ export default function App() {
             songs={allSongs}
             playlists={playlists}
             onOpenPlaylist={(id) => { setSelectedPlaylistId(id); navigateTo('playlist-detail'); setSidebarOpen(false); }}
+            currentSong={currentSong}
+            isPlaying={isPlaying}
+            onPlayPause={() => setIsPlaying(p => !p)}
           />
         )}
       </AnimatePresence>
@@ -2376,88 +2379,160 @@ function AddSongModal({ onClose, onAdd, onImportPlaylist }: {
   );
 }
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
-function Sidebar({ activeView, onNavigate, onClose, onImport, onProfile, songs, playlists, onOpenPlaylist }: {
+function Sidebar({ activeView, onNavigate, onClose, onImport, onProfile, songs, playlists, onOpenPlaylist, currentSong, isPlaying, onPlayPause }: {
   activeView: string; onNavigate: (v: any) => void; onClose: () => void; onImport: () => void; onProfile: () => void;
   songs: any[]; playlists: any[]; onOpenPlaylist: (id: string) => void;
+  currentSong: any | null; isPlaying: boolean; onPlayPause: () => void;
 }) {
+  const navItems = [
+    { icon: <Home size={17} />, label: 'Home', view: 'home' },
+    { icon: <Search size={17} />, label: 'Search', view: 'search' },
+    { icon: <LibraryBig size={17} />, label: 'Library', view: 'library', badge: songs.length || null },
+    { icon: <FolderDown size={17} />, label: 'Downloads', view: 'downloads' },
+    { icon: <Settings size={17} />, label: 'Settings', view: 'settings' },
+  ];
+
   return (
     <div className="fixed inset-0 z-[80] flex">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <motion.aside initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-        className="relative w-72 h-full glass-dark flex flex-col overflow-hidden border-r border-white/5">
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-white/5">
+      {/* Backdrop */}
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="absolute inset-0 bg-black/70 backdrop-blur-md" />
+
+      {/* Panel */}
+      <motion.aside initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+        className="relative w-72 h-full flex flex-col overflow-hidden border-r border-white/5"
+        style={{ background: 'linear-gradient(180deg, #0d0d14 0%, #080810 100%)' }}>
+
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-white/5">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-900/40">
               <Music2 size={18} className="text-black" />
             </div>
-            <span className="text-lg font-black tracking-tight">SonicStream</span>
+            <div>
+              <span className="text-sm font-black tracking-tight">SonicStream</span>
+              <p className="text-[10px] text-zinc-600 leading-tight">{songs.length} songs in library</p>
+            </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={18} /></button>
-        </div>
-
-        {/* Profile */}
-        <button onClick={onProfile} className="flex items-center gap-3 mx-4 mt-4 p-3 rounded-2xl glass-card hover:bg-white/10 transition-colors group">
-          <div className="w-11 h-11 rounded-full overflow-hidden border-2 border-emerald-500/40 shrink-0">
-            <img src="https://picsum.photos/seed/user/100/100" alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-          </div>
-          <div className="flex flex-col text-left min-w-0">
-            <span className="font-bold text-sm">Your Profile</span>
-            <span className="text-xs text-zinc-500 truncate">{songs.length} songs in library</span>
-          </div>
-          <ChevronLeft size={16} className="ml-auto rotate-180 text-zinc-500 group-hover:text-white transition-colors" />
-        </button>
-
-        {/* Nav */}
-        <div className="px-4 mt-4 space-y-0.5">
-          {[
-            { icon: <Home size={18} />, label: 'Home', view: 'home' },
-            { icon: <Search size={18} />, label: 'Search', view: 'search' },
-            { icon: <LibraryBig size={18} />, label: 'Library', view: 'library' },
-            { icon: <FolderDown size={18} />, label: 'Downloads', view: 'downloads' },
-            { icon: <Settings size={18} />, label: 'Settings', view: 'settings' },
-          ].map(({ icon, label, view }) => (
-            <button key={view} onClick={() => onNavigate(view)}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                activeView === view
-                  ? 'bg-emerald-500/12 text-emerald-400 border-l-2 border-emerald-500'
-                  : 'text-zinc-400 hover:bg-white/6 hover:text-white border-l-2 border-transparent'
-              }`}>
-              <span className="shrink-0">{icon}</span>
-              <span>{label}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Import Section */}
-        <div className="px-4 mt-5">
-          <p className="text-xs font-bold text-zinc-600 uppercase tracking-widest mb-2 px-2">Import Music</p>
-          <button onClick={onImport}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-red-600/20 to-transparent border border-red-600/20 hover:from-red-600/30 transition-all text-red-400 hover:text-red-300">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M21.543 6.498C22 8.28 22 12 22 12s0 3.72-.457 5.502c-.254.985-.997 1.76-1.938 2.022C17.896 20 12 20 12 20s-5.896 0-7.605-.476c-.945-.266-1.687-1.04-1.938-2.022C2 15.72 2 12 2 12s0-3.72.457-5.502c.254-.985.997-1.76 1.938-2.022C6.104 4 12 4 12 4s5.896 0 7.605.476c.945.266 1.687 1.04 1.938 2.022zM10 15.5l6-3.5-6-3.5v7z" /></svg>
-            YouTube / Spotify
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-zinc-500 hover:text-white">
+            <X size={16} />
           </button>
         </div>
 
-        {/* Recent Playlists */}
+        {/* ── Profile card ── */}
+        <button onClick={onProfile}
+          className="mx-4 mt-4 flex items-center gap-3 p-3 rounded-2xl border border-white/6 hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all group"
+          style={{ background: 'rgba(255,255,255,0.03)' }}>
+          <div className="relative shrink-0">
+            <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-emerald-500/40">
+              <img src="https://picsum.photos/seed/user/100/100" alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+            </div>
+            <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-[#0d0d14]" />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <p className="text-sm font-bold leading-tight">You</p>
+            <p className="text-xs text-zinc-500 leading-tight">{playlists.length} playlist{playlists.length !== 1 ? 's' : ''}</p>
+          </div>
+          <ChevronLeft size={14} className="rotate-180 text-zinc-600 group-hover:text-emerald-400 transition-colors" />
+        </button>
+
+        {/* ── Nav items ── */}
+        <div className="px-3 mt-4">
+          <p className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest px-3 mb-1.5">Menu</p>
+          <div className="space-y-0.5">
+            {navItems.map(({ icon, label, view, badge }) => (
+              <button key={view} onClick={() => onNavigate(view)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                  activeView === view
+                    ? 'bg-emerald-500/15 text-emerald-400 border-l-2 border-emerald-500 pl-[10px]'
+                    : 'text-zinc-400 hover:bg-white/6 hover:text-white border-l-2 border-transparent'
+                }`}>
+                <span className="shrink-0">{icon}</span>
+                <span className="flex-1 text-left">{label}</span>
+                {badge && badge > 0 && (
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${activeView === view ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/8 text-zinc-500'}`}>
+                    {badge > 999 ? '999+' : badge}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Import buttons ── */}
+        <div className="px-3 mt-5">
+          <p className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest px-3 mb-2">Import Music</p>
+          <div className="space-y-1.5">
+            <button onClick={onImport}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all text-red-400 hover:text-red-300 border border-red-500/15 hover:border-red-500/30 hover:bg-red-500/8"
+              style={{ background: 'rgba(239,68,68,0.05)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+                <path d="M21.543 6.498C22 8.28 22 12 22 12s0 3.72-.457 5.502c-.254.985-.997 1.76-1.938 2.022C17.896 20 12 20 12 20s-5.896 0-7.605-.476c-.945-.266-1.687-1.04-1.938-2.022C2 15.72 2 12 2 12s0-3.72.457-5.502c.254-.985.997-1.76 1.938-2.022C6.104 4 12 4 12 4s5.896 0 7.605.476c.945.266 1.687 1.04 1.938 2.022zM10 15.5l6-3.5-6-3.5v7z" />
+              </svg>
+              <span>YouTube Playlist</span>
+              <span className="ml-auto text-[10px] bg-red-500/15 text-red-400 px-1.5 py-0.5 rounded-full font-bold">URL</span>
+            </button>
+            <button onClick={onImport}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all text-green-400 hover:text-green-300 border border-green-500/15 hover:border-green-500/30 hover:bg-green-500/8"
+              style={{ background: 'rgba(29,185,84,0.05)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="shrink-0">
+                <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z" />
+              </svg>
+              <span>Spotify Playlist</span>
+              <span className="ml-auto text-[10px] bg-green-500/15 text-green-400 px-1.5 py-0.5 rounded-full font-bold">URL</span>
+            </button>
+          </div>
+        </div>
+
+        {/* ── Playlists ── */}
         {playlists.length > 0 && (
-          <div className="px-4 mt-5 flex-1 overflow-y-auto no-scrollbar">
-            <p className="text-xs font-bold text-zinc-600 uppercase tracking-widest mb-2 px-2">Your Playlists</p>
-            <div className="space-y-1">
-              {playlists.slice(0, 8).map(pl => (
+          <div className="px-3 mt-5 flex-1 overflow-y-auto no-scrollbar min-h-0">
+            <p className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest px-3 mb-2">Your Playlists</p>
+            <div className="space-y-0.5">
+              {playlists.map(pl => (
                 <button key={pl.id} onClick={() => onOpenPlaylist(pl.id)}
-                  className="w-full flex items-center gap-3 px-4 py-2 rounded-xl text-sm text-zinc-400 hover:bg-white/8 hover:text-white transition-all">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center shrink-0">
+                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-zinc-400 hover:bg-white/6 hover:text-white transition-all group">
+                  <div className="w-9 h-9 rounded-lg overflow-hidden shrink-0 border border-white/5">
                     {pl.songs?.[0]?.coverUrl
-                      ? <img src={pl.songs[0].coverUrl} alt="" className="w-full h-full object-cover rounded-lg" referrerPolicy="no-referrer" />
-                      : <Music2 size={14} className="text-zinc-600" />}
+                      ? <img src={pl.songs[0].coverUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      : <div className="w-full h-full bg-zinc-800 flex items-center justify-center"><Music2 size={13} className="text-zinc-600" /></div>}
                   </div>
-                  <div className="flex flex-col text-left min-w-0">
-                    <span className="font-semibold text-xs truncate">{pl.name}</span>
-                    <span className="text-xs text-zinc-600">{pl.songs?.length || 0} songs</span>
+                  <div className="flex-1 text-left min-w-0">
+                    <p className="text-xs font-semibold truncate group-hover:text-emerald-400 transition-colors">{pl.name}</p>
+                    <p className="text-[10px] text-zinc-600">{pl.songs?.length || 0} songs</p>
                   </div>
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Now Playing mini-player ── */}
+        {currentSong && (
+          <div className="mx-3 mb-3 mt-3 shrink-0">
+            <div className="rounded-2xl border border-white/8 overflow-hidden relative"
+              style={{ background: 'linear-gradient(135deg, rgba(16,185,129,0.12) 0%, rgba(255,255,255,0.03) 100%)' }}>
+              {currentSong.coverUrl && (
+                <img src={currentSong.coverUrl} alt="" className="absolute inset-0 w-full h-full object-cover opacity-10 blur-lg scale-110" referrerPolicy="no-referrer" />
+              )}
+              <div className="relative flex items-center gap-3 p-3">
+                <div className="w-10 h-10 rounded-xl overflow-hidden shrink-0 border border-white/10">
+                  <img src={currentSong.coverUrl || `https://picsum.photos/seed/${currentSong.id}/80/80`}
+                    alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold truncate">{currentSong.title}</p>
+                  <p className="text-[10px] text-zinc-500 truncate">{currentSong.artist}</p>
+                </div>
+                <button onClick={onPlayPause}
+                  className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center hover:bg-emerald-400 transition-colors shrink-0 shadow-lg shadow-emerald-900/40">
+                  {isPlaying
+                    ? <span className="flex gap-[3px]"><span className="w-[3px] h-3 bg-black rounded-full" /><span className="w-[3px] h-3 bg-black rounded-full" /></span>
+                    : <svg width="10" height="10" viewBox="0 0 10 10" fill="black"><polygon points="2,1 9,5 2,9" /></svg>
+                  }
+                </button>
+              </div>
             </div>
           </div>
         )}

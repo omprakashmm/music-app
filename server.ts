@@ -107,6 +107,48 @@ async function ytSearch(query: string): Promise<string | null> {
   } catch { return null; }
 }
 
+/** Fetch a URL with curl (avoids Node.js TLS issues on cloud) */
+async function curlJson(url: string): Promise<any> {
+  const { stdout } = await execAsync(
+    `curl -s -L --max-time 12 --retry 1 -A "Mozilla/5.0" "${url}"`,
+    { timeout: 20000 }
+  );
+  return JSON.parse(stdout.trim());
+}
+
+/** Fetch playlist via public Invidious instances (no bot-blocking, cloud-safe) */
+async function invidiousFetchPlaylist(playlistId: string): Promise<{ videoId: string; title: string; channel: string }[]> {
+  const INSTANCES = [
+    "https://invidious.privacydev.net",
+    "https://inv.nadeko.net",
+    "https://iv.ggtyler.dev",
+    "https://invidious.nikkosphere.com",
+    "https://yt.artemislena.eu",
+  ];
+  for (const base of INSTANCES) {
+    try {
+      const videos: any[] = [];
+      let page = 1;
+      while (true) {
+        const data = await curlJson(`${base}/api/v1/playlists/${playlistId}?page=${page}`);
+        if (!data || data.error || !Array.isArray(data.videos) || data.videos.length === 0) break;
+        videos.push(...data.videos);
+        const total: number = data.videoCount || videos.length;
+        if (videos.length >= total || page >= 10) break;
+        page++;
+      }
+      if (videos.length > 0) {
+        return videos.map(v => ({
+          videoId: v.videoId,
+          title: v.title || "Unknown",
+          channel: v.author || "Unknown Artist",
+        }));
+      }
+    } catch { continue; }
+  }
+  throw new Error("All Invidious instances failed");
+}
+
 /** Save a song to DB (returns the saved song row) */
 function saveSong(s: { title: string; artist: string; album?: string; coverUrl?: string; duration?: number; audioUrl: string; youtubeId?: string }) {
   // Check for duplicate youtubeId
@@ -283,52 +325,47 @@ async function startServer() {
     }
 
     try {
-      sseWrite(res, { type: "info", message: "Fetching playlist info via yt-dlp..." });
+      sseWrite(res, { type: "info", message: "Fetching playlist info..." });
 
-      // Use yt-dlp to fetch all playlist entries (no HTML scraping, works in cloud)
-      const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
-      let ytdlpOut: string;
+      // ── Strategy 1: Invidious API (cloud-safe, no bot detection) ───────────
+      let entries: { videoId: string; title: string; channel: string }[] = [];
+      let fetchedVia = "invidious";
+
       try {
-        const result = await execAsync(
-          `yt-dlp --flat-playlist --dump-single-json --no-warnings --no-check-certificates "${playlistUrl}"`,
-          { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
-        );
-        ytdlpOut = result.stdout;
-      } catch (e: any) {
-        const msg: string = e.stderr || e.message || "";
-        if (msg.includes("private") || msg.includes("unavailable")) {
-          sseWrite(res, { type: "error", message: "Playlist is private or unavailable." });
-        } else {
-          sseWrite(res, { type: "error", message: "yt-dlp failed: " + msg.slice(0, 200) });
+        const invVideos = await invidiousFetchPlaylist(playlistId);
+        entries = invVideos;
+        sseWrite(res, { type: "info", message: `Found ${entries.length} tracks via Invidious.` });
+      } catch (invErr: any) {
+        // ── Strategy 2: yt-dlp fallback ────────────────────────────────────
+        sseWrite(res, { type: "info", message: "Invidious unavailable, trying yt-dlp fallback..." });
+        fetchedVia = "yt-dlp";
+        const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
+        try {
+          const result = await execAsync(
+            `yt-dlp --flat-playlist --dump-single-json --no-warnings --no-check-certificates "${playlistUrl}"`,
+            { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
+          );
+          const playlistData = JSON.parse(result.stdout);
+          const rawEntries: any[] = playlistData?.entries || [];
+          for (const item of rawEntries) {
+            const videoId = item?.id || (item?.url || "").replace("https://www.youtube.com/watch?v=", "");
+            if (!videoId) continue;
+            entries.push({
+              videoId,
+              title: item?.title || "Unknown",
+              channel: item?.uploader || item?.channel || item?.uploader_id || "Unknown Artist",
+            });
+          }
+          sseWrite(res, { type: "info", message: `Found ${entries.length} tracks via yt-dlp.` });
+        } catch (ytErr: any) {
+          const msg: string = ytErr.stderr || ytErr.message || "";
+          sseWrite(res, { type: "error", message: "Import failed: " + (msg.includes("private") ? "Playlist is private or unavailable." : msg.slice(0, 200)) });
+          return res.end();
         }
-        return res.end();
-      }
-
-      let playlistData: any;
-      try { playlistData = JSON.parse(ytdlpOut); } catch {
-        sseWrite(res, { type: "error", message: "Failed to parse yt-dlp playlist output." });
-        return res.end();
-      }
-
-      const rawEntries: any[] = playlistData?.entries || [];
-
-      if (rawEntries.length === 0) {
-        sseWrite(res, { type: "error", message: "Playlist is empty or private." });
-        return res.end();
-      }
-
-      // Extract video entries
-      const entries: { videoId: string; title: string; channel: string }[] = [];
-      for (const item of rawEntries) {
-        const videoId = item?.id || item?.url?.replace("https://www.youtube.com/watch?v=", "");
-        if (!videoId) continue;
-        const title = item?.title || "Unknown";
-        const channel = item?.uploader || item?.channel || item?.uploader_id || "Unknown Artist";
-        entries.push({ videoId, title, channel });
       }
 
       if (entries.length === 0) {
-        sseWrite(res, { type: "error", message: "No playable videos found in this playlist." });
+        sseWrite(res, { type: "error", message: "Playlist is empty or private." });
         return res.end();
       }
 
@@ -343,7 +380,6 @@ async function startServer() {
           const [a, ...r] = rawTitle.split(" - ");
           artist = a.trim(); title = r.join(" - ").trim();
         }
-        // Use YouTube thumbnail URL directly (no extra API call needed)
         const thumb = `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
         try {
           const song = saveSong({ title, artist, album: "YouTube Playlist", coverUrl: thumb, duration: 0, audioUrl: `/api/stream/${videoId}`, youtubeId: videoId });
