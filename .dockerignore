@@ -1,0 +1,10 @@
+node_modules
+dist
+music.db
+.env
+*.log
+.git
+.gitignore
+README.md
+1772089729588-player-script.js
+1772089729601-player-script.js

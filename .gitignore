@@ -1,0 +1,11 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+music.db
+1772089729588-player-script.js
+1772089729601-player-script.js
