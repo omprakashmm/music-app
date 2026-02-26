@@ -270,76 +270,57 @@ async function startServer() {
 
     sSEHeaders(res);
 
-    const playlistId = extractYoutubePlaylistId(url);
+    // Accept both youtube.com and music.youtube.com URLs
+    const normalizedUrl = url.replace("music.youtube.com", "www.youtube.com");
+    const playlistId = extractYoutubePlaylistId(normalizedUrl);
     if (!playlistId) {
       sseWrite(res, { type: "error", message: "Invalid YouTube playlist URL. URL must contain ?list=..." });
       return res.end();
     }
 
     try {
-      sseWrite(res, { type: "info", message: "Fetching playlist page..." });
+      sseWrite(res, { type: "info", message: "Fetching playlist info via yt-dlp..." });
 
-      // Scrape playlist page HTML to extract ytInitialData JSON
+      // Use yt-dlp to fetch all playlist entries (no HTML scraping, works in cloud)
       const playlistUrl = `https://www.youtube.com/playlist?list=${playlistId}`;
-      const html: string = await new Promise((resolve, reject) => {
-        const req2 = https.request(playlistUrl, {
-          method: "GET",
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept": "text/html,application/xhtml+xml",
-          }
-        }, (response) => {
-          // Follow redirects
-          if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-            return resolve("REDIRECT:" + response.headers.location);
-          }
-          let data = "";
-          response.on("data", (chunk) => data += chunk);
-          response.on("end", () => resolve(data));
-        });
-        req2.on("error", reject);
-        req2.end();
-      });
-
-      if (typeof html === "string" && html.startsWith("REDIRECT:")) {
-        sseWrite(res, { type: "error", message: "Playlist redirected — it may be private or region-locked." });
+      let ytdlpOut: string;
+      try {
+        const result = await execAsync(
+          `yt-dlp --flat-playlist --dump-single-json --no-warnings "${playlistUrl}"`,
+          { timeout: 120000, maxBuffer: 50 * 1024 * 1024 }
+        );
+        ytdlpOut = result.stdout;
+      } catch (e: any) {
+        const msg: string = e.stderr || e.message || "";
+        if (msg.includes("private") || msg.includes("unavailable")) {
+          sseWrite(res, { type: "error", message: "Playlist is private or unavailable." });
+        } else {
+          sseWrite(res, { type: "error", message: "yt-dlp failed: " + msg.slice(0, 200) });
+        }
         return res.end();
       }
 
-      // Extract ytInitialData from the page
-      const dataMatch = html.match(/var ytInitialData\s*=\s*(\{.+?\});\s*<\/script>/s)
-        || html.match(/ytInitialData\s*=\s*(\{.+?\})\s*;/s);
-
-      if (!dataMatch) {
-        sseWrite(res, { type: "error", message: "Could not parse playlist data. The playlist may be private, empty, or region-locked." });
+      let playlistData: any;
+      try { playlistData = JSON.parse(ytdlpOut); } catch {
+        sseWrite(res, { type: "error", message: "Failed to parse yt-dlp playlist output." });
         return res.end();
       }
 
-      let ytData: any;
-      try { ytData = JSON.parse(dataMatch[1]); } catch {
-        sseWrite(res, { type: "error", message: "Failed to parse YouTube page data." });
-        return res.end();
-      }
+      const rawEntries: any[] = playlistData?.entries || [];
 
-      // Navigate the ytInitialData structure to find playlist entries
-      const contents = ytData?.contents?.twoColumnBrowseResultsRenderer?.tabs?.[0]
-        ?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]
-        ?.itemSectionRenderer?.contents?.[0]?.playlistVideoListRenderer?.contents;
-
-      if (!contents || contents.length === 0) {
+      if (rawEntries.length === 0) {
         sseWrite(res, { type: "error", message: "Playlist is empty or private." });
         return res.end();
       }
 
       // Extract video entries
       const entries: { videoId: string; title: string; channel: string }[] = [];
-      for (const item of contents) {
-        const v = item?.playlistVideoRenderer;
-        if (!v?.videoId) continue;
-        const title = v.title?.runs?.[0]?.text || v.title?.simpleText || "Unknown";
-        const channel = v.shortBylineText?.runs?.[0]?.text || "Unknown Artist";
-        entries.push({ videoId: v.videoId, title, channel });
+      for (const item of rawEntries) {
+        const videoId = item?.id || item?.url?.replace("https://www.youtube.com/watch?v=", "");
+        if (!videoId) continue;
+        const title = item?.title || "Unknown";
+        const channel = item?.uploader || item?.channel || item?.uploader_id || "Unknown Artist";
+        entries.push({ videoId, title, channel });
       }
 
       if (entries.length === 0) {
