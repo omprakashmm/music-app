@@ -179,25 +179,49 @@ function saveSong(s: { title: string; artist: string; album?: string; coverUrl?:
   return db.prepare("SELECT * FROM songs WHERE id = ?").get(id);
 }
 
+/** Make an HTTPS request and return parsed JSON with clear error messages */
+async function httpsJson(options: https.RequestOptions, body?: string): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (c) => data += c);
+      res.on("end", () => {
+        const raw = data.trim();
+        let parsed: any;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          // Not JSON — show the raw text so it's clear what went wrong
+          return reject(new Error(`Spotify returned non-JSON (HTTP ${res.statusCode}): "${raw.slice(0, 120)}"`));
+        }
+        if (parsed.error) {
+          return reject(new Error(`Spotify error: ${parsed.error_description || parsed.error?.message || JSON.stringify(parsed.error)}`));
+        }
+        resolve(parsed);
+      });
+    });
+    req.on("error", reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 /** Get Spotify OAuth token */
 async function spotifyToken(): Promise<string> {
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET)
-    throw new Error("Spotify credentials not configured. Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.");
+    throw new Error("Spotify credentials not set. Add SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET in your Railway service → Variables tab.");
   const creds = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString("base64");
-  return new Promise((resolve, reject) => {
-    const body = "grant_type=client_credentials";
-    const req = https.request({
-      hostname: "accounts.spotify.com", path: "/api/token", method: "POST",
-      headers: { "Authorization": `Basic ${creds}`, "Content-Type": "application/x-www-form-urlencoded", "Content-Length": body.length },
-    }, (res) => {
-      let data = "";
-      res.on("data", (c) => data += c);
-      res.on("end", () => { try { resolve(JSON.parse(data).access_token); } catch (e) { reject(e); } });
-    });
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
+  const body = "grant_type=client_credentials";
+  const data = await httpsJson({
+    hostname: "accounts.spotify.com", path: "/api/token", method: "POST",
+    headers: {
+      "Authorization": `Basic ${creds}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Length": Buffer.byteLength(body),
+    },
+  }, body);
+  if (!data.access_token) throw new Error("Spotify did not return an access token. Check your Client ID and Secret.");
+  return data.access_token;
 }
 
 /** Fetch all tracks from a Spotify playlist */
@@ -205,15 +229,9 @@ async function spotifyPlaylistTracks(playlistId: string, token: string): Promise
   const tracks: any[] = [];
   let url: string | null = `/v1/playlists/${playlistId}/tracks?limit=50&fields=next,items(track(name,artists,album(name,images)))`;
   while (url) {
-    const data: any = await new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: "api.spotify.com", path: url, method: "GET",
-        headers: { "Authorization": `Bearer ${token}` }
-      }, (res) => {
-        let d = ""; res.on("data", c => d += c);
-        res.on("end", () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
-      });
-      req.on("error", reject); req.end();
+    const data = await httpsJson({
+      hostname: "api.spotify.com", path: url, method: "GET",
+      headers: { "Authorization": `Bearer ${token}` },
     });
     if (data.items) {
       for (const item of data.items) {
