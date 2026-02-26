@@ -1,35 +1,37 @@
-FROM node:20-alpine
+FROM node:20-slim
 
-# ── System dependencies ───────────────────────────────────────────────────────
-# python3 + make + g++ are required to compile better-sqlite3 (native addon)
-# ffmpeg is required by yt-dlp for audio format conversion
-# yt-dlp standalone binary is downloaded directly for YouTube streaming
-RUN apk add --no-cache \
+# ── System dependencies ────────────────────────────────────────────────────────
+# python3 + make + g++ compile better-sqlite3 native addon
+# ffmpeg needed by yt-dlp for audio extraction
+# curl downloads the yt-dlp binary
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
     ffmpeg \
     curl \
+    ca-certificates \
   && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
      -o /usr/local/bin/yt-dlp \
-  && chmod a+rx /usr/local/bin/yt-dlp
+  && chmod a+rx /usr/local/bin/yt-dlp \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# ── Install Node dependencies ─────────────────────────────────────────────────
+# ── Install dependencies ───────────────────────────────────────────────────────
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
-# ── Copy source and build Vite frontend ──────────────────────────────────────
+# ── Build frontend ─────────────────────────────────────────────────────────────
 COPY . .
 RUN npm run build
 
-# ── Persistent data directory (mount Railway Volume here) ────────────────────
+# ── Persistent data directory (mount a Railway Volume at /data) ────────────────
 RUN mkdir -p /data
 
-# ── Runtime config ────────────────────────────────────────────────────────────
-EXPOSE 3000
+# ── Runtime ────────────────────────────────────────────────────────────────────
 ENV NODE_ENV=production
 ENV DB_PATH=/data/music.db
+EXPOSE 3000
 
 CMD ["npx", "tsx", "server.ts"]
