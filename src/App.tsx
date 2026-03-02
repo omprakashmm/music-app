@@ -588,7 +588,7 @@ export default function App() {
           <nav className="fixed bottom-0 left-0 right-0 h-20 glass-dark bottom-nav-bar flex items-center justify-around px-6 z-50">
             <NavButton icon={<Home size={24} />} label="Home" active={activeView === 'home'} onClick={() => navigateTo('home')} isPill />
             <NavButton icon={<LibraryBig size={24} />} label="Library" active={activeView === 'library'} onClick={() => navigateTo('library')} />
-            <NavButton icon={<Search size={24} />} label="Search" active={activeView === 'search'} onClick={() => navigateTo('search')} />
+            <NavButton icon={<Headphones size={24} />} label="Discover" active={activeView === 'search'} onClick={() => navigateTo('search')} />
             <button onClick={() => setSidebarOpen(true)} className={`flex flex-col items-center gap-1 transition-colors ${sidebarOpen ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
               <Menu size={24} />
             </button>
@@ -818,15 +818,47 @@ function SearchView({ onPlaySong, onProfileClick, songs, onContextMenu }: {
   songs: Song[],
   onContextMenu: (song: Song) => void
 }) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const categories = ['Pop', 'Rock', 'Hip-Hop', 'Jazz', 'Electronic', 'Classical', 'Indie', 'R&B'];
-  const colors = ['bg-emerald-600', 'bg-blue-600', 'bg-purple-600', 'bg-pink-600', 'bg-orange-600', 'bg-red-600', 'bg-indigo-600', 'bg-yellow-600'];
+  const [activeMood, setActiveMood] = useState<string | null>(null);
+  const [surpriseAnim, setSurpriseAnim] = useState(false);
+  const [quickPicks, setQuickPicks] = useState<Song[]>([]);
 
-  const filteredSongs = songs.filter(song =>
-    song.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    song.artist.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    song.album.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const moods = [
+    { label: 'Happy',    emoji: '🎉', color: 'from-yellow-500 to-orange-500' },
+    { label: 'Chill',    emoji: '😌', color: 'from-blue-500 to-cyan-600' },
+    { label: 'Energetic',emoji: '⚡', color: 'from-orange-500 to-red-500' },
+    { label: 'Sad',      emoji: '🌧️', color: 'from-indigo-600 to-blue-900' },
+    { label: 'Focus',    emoji: '🎯', color: 'from-emerald-500 to-teal-600' },
+    { label: 'Party',    emoji: '🪩', color: 'from-pink-500 to-purple-600' },
+  ];
+
+  useEffect(() => {
+    refreshPicks();
+  }, [songs]);
+
+  const refreshPicks = () => {
+    if (songs.length === 0) return;
+    setQuickPicks([...songs].sort(() => Math.random() - 0.5).slice(0, 5));
+  };
+
+  const surpriseMe = () => {
+    if (!songs.length) return;
+    setSurpriseAnim(true);
+    setTimeout(() => {
+      const random = songs[Math.floor(Math.random() * songs.length)];
+      onPlaySong(random);
+      setSurpriseAnim(false);
+    }, 600);
+  };
+
+  const playMood = (mood: string) => {
+    setActiveMood(mood);
+    if (!songs.length) return;
+    const random = songs[Math.floor(Math.random() * songs.length)];
+    onPlaySong(random);
+  };
+
+  const uniqueArtists = new Set(songs.map(s => s.artist)).size;
+  const totalMins = Math.floor(songs.reduce((a, s) => a + (s.duration || 0), 0) / 60);
 
   return (
     <div className="space-y-8">
@@ -838,25 +870,75 @@ function SearchView({ onPlaySong, onProfileClick, songs, onContextMenu }: {
           >
             <img src="https://picsum.photos/seed/user/100/100" alt="Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
           </button>
-          <h1 className="text-xl font-black tracking-tight">Search</h1>
+          <h1 className="text-xl font-black tracking-tight">Discover</h1>
         </div>
       </header>
 
-      <div className="relative">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Songs, artists, albums…"
-          className="w-full glass border border-white/8 text-white py-3.5 pl-11 pr-4 rounded-2xl text-sm font-medium placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 transition-colors"
-        />
+      {/* ── Surprise Me ────────────────────────────────── */}
+      <button
+        onClick={surpriseMe}
+        className={`w-full py-5 rounded-3xl font-black text-lg tracking-wide bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 shadow-xl shadow-emerald-900/40 transition-all active:scale-95 relative overflow-hidden select-none ${
+          surpriseAnim ? 'scale-95 opacity-80' : 'hover:brightness-110'
+        }`}
+      >
+        <span className={`flex items-center justify-center gap-2 transition-all ${surpriseAnim ? 'opacity-0' : ''}`}>
+          🎲 Surprise Me
+        </span>
+        {surpriseAnim && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Activity size={28} className="animate-spin text-white" />
+          </div>
+        )}
+      </button>
+
+      {/* ── Library Stats ──────────────────────────────── */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="glass-card rounded-2xl p-4 text-center border border-white/8">
+          <div className="text-2xl font-black text-emerald-400">{songs.length}</div>
+          <div className="text-xs text-zinc-500 mt-1">Songs</div>
+        </div>
+        <div className="glass-card rounded-2xl p-4 text-center border border-white/8">
+          <div className="text-2xl font-black text-purple-400">{uniqueArtists}</div>
+          <div className="text-xs text-zinc-500 mt-1">Artists</div>
+        </div>
+        <div className="glass-card rounded-2xl p-4 text-center border border-white/8">
+          <div className="text-2xl font-black text-blue-400">{totalMins}</div>
+          <div className="text-xs text-zinc-500 mt-1">Minutes</div>
+        </div>
       </div>
 
-      {searchQuery ? (
+      {/* ── Mood Selector ──────────────────────────────── */}
+      <section>
+        <h2 className="text-base font-bold mb-3 text-zinc-300">What's your vibe?</h2>
+        <div className="grid grid-cols-3 gap-3">
+          {moods.map(mood => (
+            <button
+              key={mood.label}
+              onClick={() => playMood(mood.label)}
+              className={`bg-gradient-to-br ${mood.color} rounded-2xl p-4 flex flex-col items-center gap-1.5 transition-all border border-white/10 hover:scale-105 active:scale-95 ${
+                activeMood === mood.label ? 'ring-2 ring-white/50 scale-105 shadow-lg' : ''
+              }`}
+            >
+              <span className="text-2xl">{mood.emoji}</span>
+              <span className="text-xs font-bold">{mood.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Quick Picks ────────────────────────────────── */}
+      {quickPicks.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-base font-bold text-zinc-300">Results</h2>
-          {filteredSongs.map(song => (
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-zinc-300">Quick Picks</h2>
+            <button
+              onClick={refreshPicks}
+              className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1"
+            >
+              <Shuffle size={12} /> Refresh
+            </button>
+          </div>
+          {quickPicks.map(song => (
             <div
               key={song.id}
               onClick={() => onPlaySong(song)}
@@ -870,10 +952,7 @@ function SearchView({ onPlaySong, onProfileClick, songs, onContextMenu }: {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="font-bold text-sm truncate group-hover:text-emerald-400 transition-colors">{song.title}</div>
-                <div className="text-xs text-zinc-500 truncate flex items-center gap-1">
-                  <span>{song.artist}</span>
-                  {song.album && song.album !== 'Unknown Album' && song.album !== 'YouTube' && <><span className="opacity-30">·</span><span className="truncate opacity-70">{song.album}</span></>}
-                </div>
+                <div className="text-xs text-zinc-500 truncate">{song.artist}</div>
               </div>
               <button
                 className="p-2 text-zinc-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100"
@@ -883,26 +962,14 @@ function SearchView({ onPlaySong, onProfileClick, songs, onContextMenu }: {
               </button>
             </div>
           ))}
-          {filteredSongs.length === 0 && (
-            <div className="text-center py-10 text-zinc-600 text-sm">No results for "{searchQuery}"</div>
-          )}
         </section>
-      ) : (
-        <section>
-          <h2 className="text-base font-bold mb-3 text-zinc-300">Browse by genre</h2>
-          <div className="grid grid-cols-2 gap-3">
-            {categories.map((cat, i) => (
-              <div
-                key={cat}
-                className={`${colors[i % colors.length]} bg-opacity-70 aspect-video rounded-2xl p-4 relative overflow-hidden cursor-pointer hover:scale-[1.02] active:scale-[0.99] transition-transform border border-white/10`}
-              >
-                <span className="text-sm font-bold">{cat}</span>
-                <div className="absolute -right-3 -bottom-3 w-14 h-14 bg-black/20 rotate-15 rounded-xl" />
-                <Music2 size={32} className="absolute right-3 bottom-2 opacity-20" />
-              </div>
-            ))}
-          </div>
-        </section>
+      )}
+
+      {songs.length === 0 && (
+        <div className="text-center py-16 space-y-3">
+          <div className="text-5xl">🎵</div>
+          <p className="text-zinc-500 text-sm">Add some songs to get started!</p>
+        </div>
       )}
     </div>
   );
