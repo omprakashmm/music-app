@@ -101,6 +101,17 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
+  // ── Listening stats (persisted to localStorage) ──────────────────────────────
+  const [listenSeconds, setListenSeconds] = useState<number>(() =>
+    parseInt(localStorage.getItem('sony_listen_secs') || '0', 10)
+  );
+  const [playCounts, setPlayCounts] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem('sony_play_counts') || '{}'); } catch { return {}; }
+  });
+  const [dailyMins, setDailyMins] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem('sony_daily_mins') || '{}'); } catch { return {}; }
+  });
+
   const importPlaylist = async (type: 'youtube' | 'spotify', url: string) => {
     setImportProgress({ active: true, type, current: 0, total: 0, track: '', songs: [], error: '', done: false });
     const endpoint = type === 'youtube' ? '/api/import/youtube-playlist' : '/api/import/spotify-playlist';
@@ -238,7 +249,31 @@ export default function App() {
       const filtered = prev.filter(s => s.id !== song.id);
       return [song, ...filtered].slice(0, 10);
     });
+    setPlayCounts(prev => {
+      const next = { ...prev, [song.id]: (prev[song.id] || 0) + 1 };
+      localStorage.setItem('sony_play_counts', JSON.stringify(next));
+      return next;
+    });
   };
+
+  // Increment listen seconds every second while playing
+  useEffect(() => {
+    if (!isPlaying) return;
+    const interval = setInterval(() => {
+      const today = new Date().toISOString().slice(0, 10);
+      setListenSeconds(prev => {
+        const next = prev + 1;
+        localStorage.setItem('sony_listen_secs', String(next));
+        return next;
+      });
+      setDailyMins(prev => {
+        const next = { ...prev, [today]: (prev[today] || 0) + 1 / 60 };
+        localStorage.setItem('sony_daily_mins', JSON.stringify(next));
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isPlaying]);
 
   const skipNext = () => {
     if (!currentSong) return;
@@ -440,7 +475,7 @@ export default function App() {
           />
         );
       case 'profile':
-        return <ProfileView onBack={() => navigateTo('profile-menu')} />;
+        return <ProfileView onBack={() => navigateTo('profile-menu')} listenSeconds={listenSeconds} playCounts={playCounts} dailyMins={dailyMins} songs={allSongs} recents={recents} likedSongs={likedSongs} />;
       case 'settings':
         return <SettingsView onBack={() => navigateTo('profile-menu')} />;
       case 'player':
@@ -2236,60 +2271,155 @@ function SettingsView({ onBack }: { onBack: () => void }) {
   );
 }
 
-function ProfileView({ onBack }: { onBack: () => void }) {
+function ProfileView({ onBack, listenSeconds, playCounts, dailyMins, songs, recents, likedSongs }: {
+  onBack: () => void;
+  listenSeconds: number;
+  playCounts: Record<string, number>;
+  dailyMins: Record<string, number>;
+  songs: Song[];
+  recents: Song[];
+  likedSongs: string[];
+}) {
+  // ── Format helpers ────────────────────────────────────────────────────────────
+  const fmtTime = (secs: number) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}h ${m}m`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
+  // ── Top songs by play count ───────────────────────────────────────────────────
+  const topSongs = [...songs]
+    .filter(s => playCounts[s.id])
+    .sort((a, b) => (playCounts[b.id] || 0) - (playCounts[a.id] || 0))
+    .slice(0, 5);
+
+  // ── Top artist ────────────────────────────────────────────────────────────────
+  const artistCounts: Record<string, number> = {};
+  songs.forEach(s => { artistCounts[s.artist] = (artistCounts[s.artist] || 0) + (playCounts[s.id] || 0); });
+  const topArtist = Object.entries(artistCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+
+  // ── 7-day chart ───────────────────────────────────────────────────────────────
+  const last7 = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    const key = d.toISOString().slice(0, 10);
+    return { label: d.toLocaleDateString('en', { weekday: 'short' }), mins: Math.round(dailyMins[key] || 0) };
+  });
+  const maxMins = Math.max(...last7.map(d => d.mins), 1);
+
+  // ── Streak ────────────────────────────────────────────────────────────────────
+  let streak = 0;
+  for (let i = 0; i < 365; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    if ((dailyMins[key] || 0) >= 1) streak++;
+    else break;
+  }
+
+  const totalHours = (listenSeconds / 3600).toFixed(1);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 pb-32">
       <header className="flex items-center gap-6">
-        <button onClick={onBack} className="p-1">
-          <ChevronLeft size={28} />
-        </button>
+        <button onClick={onBack} className="p-1"><ChevronLeft size={28} /></button>
         <h1 className="text-2xl font-semibold">Profile</h1>
       </header>
 
-      <div className="flex flex-col items-center gap-4 py-6">
-        <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-emerald-500/20 shadow-2xl">
+      {/* Avatar */}
+      <div className="flex flex-col items-center gap-3 py-4">
+        <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-emerald-500/30 shadow-2xl shadow-emerald-900/30">
           <img src="https://picsum.photos/seed/user/200/200" alt="User" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
         </div>
         <div className="text-center">
-          <h2 className="text-2xl font-bold">John Doe</h2>
-          <p className="text-zinc-400 text-sm">Premium Member</p>
+          <h2 className="text-xl font-bold">You</h2>
+          <p className="text-zinc-500 text-xs">{likedSongs.length} liked · {songs.length} songs</p>
         </div>
       </div>
 
-      <section className="grid grid-cols-2 gap-4">
-        <div className="glass-card p-4 rounded-2xl">
-          <span className="text-zinc-500 text-xs uppercase font-bold tracking-wider">Hours Listened</span>
-          <div className="text-2xl font-bold mt-1">124.5</div>
+      {/* ── Wrapped Hero Card ─────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-emerald-600 via-teal-700 to-cyan-900 shadow-2xl shadow-emerald-900/50 border border-white/10">
+        <div className="absolute -top-8 -right-8 w-40 h-40 bg-white/5 rounded-full" />
+        <div className="absolute -bottom-6 -left-6 w-28 h-28 bg-white/5 rounded-full" />
+        <p className="text-xs font-bold tracking-widest text-emerald-200 uppercase mb-1">Your Listening Story</p>
+        <div className="text-5xl font-black text-white mb-1">{totalHours}<span className="text-2xl font-bold text-emerald-300"> hrs</span></div>
+        <p className="text-emerald-200 text-sm">total time with Sony 🎧</p>
+        <div className="mt-4 flex gap-4">
+          <div className="flex-1 bg-black/20 rounded-2xl p-3">
+            <div className="text-xs text-emerald-200 mb-0.5">Top Artist</div>
+            <div className="font-bold text-sm truncate">{topArtist}</div>
+          </div>
+          <div className="flex-1 bg-black/20 rounded-2xl p-3">
+            <div className="text-xs text-emerald-200 mb-0.5">Streak</div>
+            <div className="font-bold text-sm">{streak} day{streak !== 1 ? 's' : ''} 🔥</div>
+          </div>
+          <div className="flex-1 bg-black/20 rounded-2xl p-3">
+            <div className="text-xs text-emerald-200 mb-0.5">Plays</div>
+            <div className="font-bold text-sm">{Object.values(playCounts).reduce((a, b) => a + b, 0)}</div>
+          </div>
         </div>
-        <div className="glass-card p-4 rounded-2xl">
-          <span className="text-zinc-500 text-xs uppercase font-bold tracking-wider">Top Artist</span>
-          <div className="text-2xl font-bold mt-1">M83</div>
+      </div>
+
+      {/* ── Live counter ──────────────────────────────────────────────────── */}
+      <div className="glass-card rounded-2xl p-4 flex items-center gap-4 border border-white/8">
+        <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
+          <Clock size={20} className="text-emerald-400" />
         </div>
+        <div>
+          <div className="text-xs text-zinc-500 font-semibold uppercase tracking-wider">Time Listened</div>
+          <div className="text-2xl font-black text-emerald-400 tabular-nums">{fmtTime(listenSeconds)}</div>
+        </div>
+      </div>
+
+      {/* ── 7-day chart ───────────────────────────────────────────────────── */}
+      <section className="glass-card p-5 rounded-2xl border border-white/8 space-y-3">
+        <h3 className="text-sm font-bold text-zinc-300">This Week</h3>
+        <div className="flex items-end gap-2 h-20">
+          {last7.map((d, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1">
+              <div
+                className="w-full rounded-t-lg transition-all"
+                style={{
+                  height: `${Math.max((d.mins / maxMins) * 64, d.mins > 0 ? 6 : 2)}px`,
+                  background: i === 6
+                    ? 'linear-gradient(to top, #10b981, #34d399)'
+                    : 'rgba(255,255,255,0.12)'
+                }}
+              />
+              <span className="text-[9px] text-zinc-600">{d.label}</span>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-zinc-600">Today: <span className="text-white font-semibold">{last7[6].mins} min</span></p>
       </section>
 
-      <section className="glass-card p-6 rounded-2xl space-y-4">
-        <h3 className="text-lg font-semibold">Listening Progress</h3>
-        <div className="space-y-4">
-          <div>
-            <div className="flex justify-between text-sm mb-2">
-              <span className="text-zinc-400">Monthly Goal</span>
-              <span>75%</span>
+      {/* ── Top Songs ─────────────────────────────────────────────────────── */}
+      {topSongs.length > 0 && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-bold text-zinc-300 uppercase tracking-widest">Most Played</h3>
+          {topSongs.map((song, i) => (
+            <div key={song.id} className="flex items-center gap-3.5 glass-card p-3 rounded-2xl border border-white/6">
+              <span className="text-zinc-600 font-black text-base w-5 text-center">{i + 1}</span>
+              <img src={song.coverUrl} alt={song.title} className="w-11 h-11 rounded-xl object-cover" referrerPolicy="no-referrer" />
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm truncate">{song.title}</div>
+                <div className="text-xs text-zinc-500">{song.artist}</div>
+              </div>
+              <span className="text-xs text-emerald-400 font-bold shrink-0">{playCounts[song.id]}x</span>
             </div>
-            <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-full bg-emerald-500 w-3/4" />
-            </div>
-          </div>
-          <div>
-            <div className="flex justify-between text-sm mb-2">
-              <span className="text-zinc-400">Daily Streak</span>
-              <span>12 days</span>
-            </div>
-            <div className="h-2 bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-full bg-rose-500 w-1/2" />
-            </div>
-          </div>
+          ))}
+        </section>
+      )}
+
+      {listenSeconds === 0 && topSongs.length === 0 && (
+        <div className="text-center py-10 space-y-2">
+          <div className="text-4xl">🎵</div>
+          <p className="text-zinc-500 text-sm">Start listening to build your stats!</p>
         </div>
-      </section>
+      )}
     </div>
   );
 }
