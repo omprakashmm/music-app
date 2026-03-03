@@ -148,3 +148,92 @@ body::before {
 .ring-emerald {
   box-shadow: 0 0 0 2px var(--accent);
 }
+
+/* ─── Play button pulse glow ───────────────────────────────────────────────── */
+.play-glow {
+  box-shadow: 0 0 0 0 rgba(16,185,129,0.7);
+  animation: play-pulse 1.8s ease-out infinite;
+}
+@keyframes play-pulse {
+  0%   { box-shadow: 0 0 0 0px rgba(16,185,129,0.55); }
+  60%  { box-shadow: 0 0 0 10px rgba(16,185,129,0); }
+  100% { box-shadow: 0 0 0 0px rgba(16,185,129,0); }
+}
+
+/* ─── Themes ──────────────────────────────────────────────────────────────── */
+
+body.theme-neon {
+  --bg-dark: #07000f;
+  --card-bg: rgba(168, 40, 240, 0.07);
+  --card-border: rgba(168, 40, 240, 0.18);
+  --accent: #b832ff;
+  --accent-dim: rgba(184, 50, 255, 0.12);
+  --accent-border: rgba(184, 50, 255, 0.3);
+  background-color: var(--bg-dark);
+}
+body.theme-neon::before {
+  background:
+    radial-gradient(ellipse 70% 50% at 15% 10%, rgba(184, 50, 255, 0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 50% at 85% 80%, rgba(255, 40, 180, 0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 60% at 50% 50%, rgba(184, 50, 255, 0.05) 0%, transparent 50%);
+}
+body.theme-neon .play-glow {
+  animation-name: play-pulse-neon;
+}
+@keyframes play-pulse-neon {
+  0%   { box-shadow: 0 0 0 0px rgba(184,50,255,0.55); }
+  60%  { box-shadow: 0 0 0 12px rgba(184,50,255,0); }
+  100% { box-shadow: 0 0 0 0px rgba(184,50,255,0); }
+}
+
+body.theme-minimal {
+  --bg-dark: #111113;
+  --card-bg: rgba(255,255,255,0.025);
+  --card-border: rgba(255,255,255,0.055);
+  --accent: #818cf8;
+  --accent-dim: rgba(129,140,248,0.1);
+  --accent-border: rgba(129,140,248,0.22);
+  background-color: var(--bg-dark);
+}
+body.theme-minimal::before {
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(129,140,248,0.06) 0%, transparent 70%);
+}
+body.theme-minimal .play-glow {
+  animation: none;
+  box-shadow: 0 0 16px rgba(129,140,248,0.4);
+}
+
+body.theme-cyberpunk {
+  --bg-dark: #000208;
+  --card-bg: rgba(0, 240, 230, 0.04);
+  --card-border: rgba(0, 240, 230, 0.14);
+  --accent: #00f0e6;
+  --accent-dim: rgba(0,240,230,0.08);
+  --accent-border: rgba(0,240,230,0.25);
+  background-color: var(--bg-dark);
+}
+body.theme-cyberpunk::before {
+  background:
+    radial-gradient(ellipse 60% 40% at 20% 20%, rgba(0,240,230,0.12) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 40% at 80% 80%, rgba(240,200,0,0.08) 0%, transparent 55%);
+}
+body.theme-cyberpunk::after {
+  content: "";
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background-image: repeating-linear-gradient(
+    0deg, transparent, transparent 3px,
+    rgba(0,240,230,0.015) 3px, rgba(0,240,230,0.015) 4px
+  );
+  z-index: 0;
+  pointer-events: none;
+}
+body.theme-cyberpunk .play-glow {
+  animation-name: play-pulse-cyber;
+}
+@keyframes play-pulse-cyber {
+  0%   { box-shadow: 0 0 0 0px rgba(0,240,230,0.6); }
+  60%  { box-shadow: 0 0 0 12px rgba(0,240,230,0); }
+  100% { box-shadow: 0 0 0 0px rgba(0,240,230,0); }
+}

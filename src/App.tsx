@@ -102,6 +102,11 @@ export default function App() {
   const audioRef = useRef<HTMLAudioElement>(null);
 
   // ── Listening stats (persisted to localStorage) ──────────────────────────────
+  // ── Theme ──────────────────────────────────────────────────────────────────
+  const [theme, setTheme] = useState<'dark' | 'neon' | 'minimal' | 'cyberpunk'>(() =>
+    (localStorage.getItem('sony_theme') as any) || 'dark'
+  );
+
   const [listenSeconds, setListenSeconds] = useState<number>(() =>
     parseInt(localStorage.getItem('sony_listen_secs') || '0', 10)
   );
@@ -255,6 +260,12 @@ export default function App() {
       return next;
     });
   };
+
+  // Apply theme to body
+  useEffect(() => {
+    document.body.className = theme === 'dark' ? '' : `theme-${theme}`;
+    localStorage.setItem('sony_theme', theme);
+  }, [theme]);
 
   // Increment listen seconds every second while playing
   useEffect(() => {
@@ -435,7 +446,7 @@ export default function App() {
 
     switch (activeView) {
       case 'home':
-        return <HomeView onPlaySong={playSong} onProfileClick={() => navigateTo('profile-menu')} songs={allSongs} onAddSong={() => setShowAddSong(true)} onDeleteSong={deleteSong} />;
+        return <HomeView onPlaySong={playSong} onProfileClick={() => navigateTo('profile-menu')} songs={allSongs} onAddSong={() => setShowAddSong(true)} onDeleteSong={deleteSong} listenSeconds={listenSeconds} dailyMins={dailyMins} />;
       case 'search':
         return <SearchView onPlaySong={playSong} onProfileClick={() => navigateTo('profile-menu')} songs={allSongs} onContextMenu={(s) => setContextSong(s)} />;
       case 'library':
@@ -477,7 +488,7 @@ export default function App() {
       case 'profile':
         return <ProfileView onBack={() => navigateTo('profile-menu')} listenSeconds={listenSeconds} playCounts={playCounts} dailyMins={dailyMins} songs={allSongs} recents={recents} likedSongs={likedSongs} />;
       case 'settings':
-        return <SettingsView onBack={() => navigateTo('profile-menu')} />;
+        return <SettingsView onBack={() => navigateTo('profile-menu')} theme={theme} setTheme={setTheme} />;
       case 'player':
         return (
           <PlayerView
@@ -561,7 +572,7 @@ export default function App() {
           />
         ) : null;
       default:
-        return <HomeView onPlaySong={playSong} onProfileClick={() => navigateTo('profile-menu')} songs={allSongs} onAddSong={() => setShowAddSong(true)} onDeleteSong={deleteSong} />;
+        return <HomeView onPlaySong={playSong} onProfileClick={() => navigateTo('profile-menu')} songs={allSongs} onAddSong={() => setShowAddSong(true)} onDeleteSong={deleteSong} listenSeconds={listenSeconds} dailyMins={dailyMins} />;
     }
   };
 
@@ -717,7 +728,7 @@ function PlayerBar({
             <SkipBack size={16} fill="currentColor" />
           </button>
           <button onClick={e => { e.stopPropagation(); onTogglePlay(); }}
-            className="w-9 h-9 bg-white text-black rounded-full flex items-center justify-center hover:bg-zinc-100 transition-colors shadow-lg">
+            className={`w-9 h-9 bg-white text-black rounded-full flex items-center justify-center hover:bg-zinc-100 transition-colors shadow-lg ${isPlaying ? 'play-glow' : ''}`}>
             {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
           </button>
           <button onClick={e => { e.stopPropagation(); onSkipNext(); }} className="p-1.5 text-zinc-400 hover:text-white transition-colors">
@@ -738,15 +749,29 @@ function getGreeting() {
   return 'Good night';
 }
 
-function HomeView({ onPlaySong, onProfileClick, songs, onAddSong, onDeleteSong }: {
+function HomeView({ onPlaySong, onProfileClick, songs, onAddSong, onDeleteSong, listenSeconds, dailyMins }: {
   onPlaySong: (song: Song) => void,
   onProfileClick: () => void,
   songs: Song[],
   onAddSong: () => void,
-  onDeleteSong: (id: string) => void
+  onDeleteSong: (id: string) => void,
+  listenSeconds: number,
+  dailyMins: Record<string, number>,
 }) {
+  const weekMins = React.useMemo(() => {
+    let total = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      total += dailyMins[key] || 0;
+    }
+    return Math.round(total);
+  }, [dailyMins]);
+  const weekDisplay = weekMins >= 60 ? `${(weekMins / 60).toFixed(1)}h` : `${weekMins}m`;
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       <header className="flex items-center justify-between">
         {/* Brand */}
         <div className="flex items-center gap-2.5">
@@ -754,14 +779,14 @@ function HomeView({ onPlaySong, onProfileClick, songs, onAddSong, onDeleteSong }
             <Music2 size={18} className="text-black" />
           </div>
           <div>
-            <h1 className="text-lg font-black tracking-tight leading-tight">SonicStream</h1>
-            <p className="text-[11px] text-zinc-500 font-medium leading-tight">{getGreeting()}</p>
+            <h1 className="text-lg font-black tracking-tight leading-tight">Sony</h1>
+            <p className="text-[11px] text-zinc-500 font-medium leading-tight">{getGreeting()} · {weekDisplay} this week</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onAddSong}
-            className="flex items-center gap-1.5 bg-emerald-500 text-black px-3.5 py-2 rounded-full text-xs font-bold hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-900/30"
+            className="flex items-center gap-1.5 bg-emerald-500 text-black px-3.5 py-2 rounded-full text-xs font-bold hover:bg-emerald-400 active:scale-95 transition-all shadow-lg shadow-emerald-900/30"
           >
             <Plus size={14} /> Add Song
           </button>
@@ -800,10 +825,17 @@ function HomeView({ onPlaySong, onProfileClick, songs, onAddSong, onDeleteSong }
                 <div
                   key={song.id}
                   onClick={() => onPlaySong(song)}
-                  className="glass-card rounded-2xl p-2.5 flex items-center gap-2.5 cursor-pointer group"
+                  className="glass-card rounded-2xl p-2.5 flex items-center gap-2.5 cursor-pointer group hover:border-emerald-500/30 transition-all active:scale-[0.98]"
                 >
-                  <img src={song.coverUrl} alt={song.title} className="w-12 h-12 rounded-xl object-cover shrink-0" referrerPolicy="no-referrer" />
-                  <span className="text-xs font-semibold line-clamp-2 leading-snug">{song.title}</span>
+                  <div className="relative shrink-0">
+                    <img src={song.coverUrl} alt={song.title} className="w-12 h-12 rounded-xl object-cover" referrerPolicy="no-referrer" />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-center justify-center">
+                      <div className="w-7 h-7 bg-emerald-500 rounded-full flex items-center justify-center shadow-lg">
+                        <Play size={12} fill="white" className="ml-0.5 text-white" />
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-xs font-semibold line-clamp-2 leading-snug group-hover:text-emerald-400 transition-colors">{song.title}</span>
                 </div>
               ))}
             </div>
@@ -2224,44 +2256,77 @@ function ProfileMenuView({ onClose, onViewProfile, onSettings, recents, onPlayRe
           </div>
         </div>
 
+        <button onClick={onSettings} className="flex items-center gap-6 w-full group">
+          <Layout size={28} className="text-zinc-400 group-hover:text-white transition-colors" />
+          <span className="text-lg font-medium">Appearance</span>
+        </button>
       </div>
     </div>
   );
 }
 
-function SettingsView({ onBack }: { onBack: () => void }) {
-  const settingsItems = [
-    { icon: <CloudDownload size={24} />, title: 'Updates', desc: 'Check for new updates' },
-    { icon: <FolderDown size={24} />, title: 'Downloads', desc: 'Download Path, Download Quality and more...' },
-    { icon: <Headphones size={24} />, title: 'Player Settings', desc: 'Stream quality, Auto Play, etc.' },
-    { icon: <Layout size={24} />, title: 'UI Elements & Services', desc: 'Auto slide, Source Engines etc.' },
-    { icon: <Activity size={24} />, title: 'Last.FM Settings', desc: 'API Key, Secret, and Scrobbling settings.' },
-    { icon: <Database size={24} />, title: 'Storage', desc: 'Backup, Cache, History, Restore and more...' },
-    { icon: <Globe size={24} />, title: 'Language & Country', desc: 'Select your language and country.' },
-    { icon: <Github size={24} />, title: 'About', desc: 'About the app, version, developer, etc.' },
+function SettingsView({ onBack, theme, setTheme }: {
+  onBack: () => void;
+  theme: 'dark' | 'neon' | 'minimal' | 'cyberpunk';
+  setTheme: (t: 'dark' | 'neon' | 'minimal' | 'cyberpunk') => void;
+}) {
+  const themes: { id: 'dark' | 'neon' | 'minimal' | 'cyberpunk'; label: string; emoji: string; desc: string; from: string; to: string }[] = [
+    { id: 'dark',      label: 'Dark',      emoji: '🌑', desc: 'Classic deep dark with emerald glow',    from: 'from-zinc-900',     to: 'to-zinc-950' },
+    { id: 'neon',      label: 'Neon',      emoji: '💜', desc: 'Vivid purple & pink neon atmosphere',   from: 'from-purple-900',   to: 'to-violet-950' },
+    { id: 'minimal',   label: 'Minimal',   emoji: '⬜', desc: 'Clean & quiet indigo-accented look',    from: 'from-zinc-800',     to: 'to-indigo-950' },
+    { id: 'cyberpunk', label: 'Cyberpunk', emoji: '⚡', desc: 'Cyan & gold with scanline grid effect', from: 'from-cyan-900',     to: 'to-zinc-950' },
   ];
 
   return (
     <div className="min-h-screen flex flex-col pb-20">
-      <header className="flex items-center p-6 gap-6">
-        <button onClick={onBack} className="p-1">
-          <ChevronLeft size={28} />
-        </button>
-        <h1 className="text-2xl font-semibold">Settings</h1>
+      <header className="flex items-center p-6 gap-4">
+        <button onClick={onBack} className="p-1"><ChevronLeft size={28} /></button>
+        <h1 className="text-2xl font-semibold">Appearance</h1>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-6 space-y-4">
-        {settingsItems.map((item, i) => (
-          <div key={i} className="flex items-start gap-6 p-4 rounded-2xl glass-card cursor-pointer group">
-            <div className="text-zinc-200 mt-1">
-              {item.icon}
+      <div className="px-6 space-y-6">
+        <div>
+          <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-4">Choose Your Theme</h2>
+          <div className="grid grid-cols-2 gap-3">
+            {themes.map(t => (
+              <button
+                key={t.id}
+                onClick={() => setTheme(t.id)}
+                className={`relative rounded-2xl overflow-hidden border-2 transition-all active:scale-95 ${
+                  theme === t.id
+                    ? 'border-emerald-500 shadow-lg shadow-emerald-900/40'
+                    : 'border-white/8 hover:border-white/20'
+                }`}
+              >
+                <div className={`bg-gradient-to-br ${t.from} ${t.to} h-24 flex flex-col items-center justify-center gap-1`}>
+                  <span className="text-3xl">{t.emoji}</span>
+                  <span className="text-xs font-bold">{t.label}</span>
+                  {theme === t.id && (
+                    <div className="absolute top-2 right-2 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                      <span className="text-[10px] text-black font-black">✓</span>
+                    </div>
+                  )}
+                </div>
+                <div className="px-3 py-2 bg-black/30">
+                  <p className="text-[10px] text-zinc-400 text-left leading-tight">{t.desc}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="glass-card rounded-2xl p-4 border border-white/8 space-y-3">
+          <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">About</h2>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center">
+              <Music2 size={18} className="text-black" />
             </div>
-            <div className="flex flex-col">
-              <span className="text-lg font-medium group-hover:text-rose-400 transition-colors">{item.title}</span>
-              <span className="text-sm text-zinc-500">{item.desc}</span>
+            <div>
+              <div className="font-bold text-sm">Sony Music</div>
+              <div className="text-xs text-zinc-500">Version 1.0.0</div>
             </div>
           </div>
-        ))}
+        </div>
       </div>
     </div>
   );
