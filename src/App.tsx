@@ -2224,10 +2224,6 @@ function ProfileMenuView({ onClose, onViewProfile, onSettings, recents, onPlayRe
           </div>
         </div>
 
-        <button onClick={onSettings} className="flex items-center gap-6 w-full group">
-          <Settings size={28} className="text-zinc-400 group-hover:text-white transition-colors" />
-          <span className="text-lg font-medium">Settings and privacy</span>
-        </button>
       </div>
     </div>
   );
