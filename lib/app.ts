@@ -388,9 +388,10 @@ export function createApp() {
     }
   });
 
-  // ── YouTube: audio stream proxy ────────────────────────────────────────────
-  // Proxies audio bytes through our own endpoint so CORS is never an issue.
-  // Supports byte-range requests so browsers can seek.
+  // ── YouTube: audio stream ──────────────────────────────────────────────────
+  // Returns a 302 redirect to a fresh Invidious audio URL.
+  // The HTML5 <audio> element follows redirects natively — no CORS headers
+  // needed, and no response-body size limits (unlike serverless proxying).
   app.get("/api/stream/:videoId", async (req, res) => {
     const { videoId } = req.params;
     if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId))
@@ -398,52 +399,22 @@ export function createApp() {
     try {
       const info = await invidiousVideoInfo(videoId);
       const base: string = info._base;
-      // Prefer itag 140 (AAC 128 kbps m4a) → 251 (Opus webm) → any audio
+
+      // Try to get a direct adaptive-format URL (itag 140 = AAC 128 kbps m4a)
       const formats: any[] = info.adaptiveFormats || [];
       const audio =
         formats.find((f: any) => f.itag === 140) ||
         formats.find((f: any) => f.itag === 251) ||
         formats.find((f: any) => (f.type as string)?.startsWith("audio/"));
-      const audioUrl = audio?.url ||
+
+      // Prefer direct CDN URL; fall back to Invidious latest_version proxy
+      const redirectUrl = audio?.url ||
         `${base}/latest_version?id=${videoId}&itag=140&local=true`;
 
-      // Forward range header so browsers can seek
-      const upstreamHeaders: Record<string, string> = {
-        "User-Agent": "Mozilla/5.0 (compatible; SonicStream/1.0)",
-        "Referer": base,
-      };
-      if (req.headers.range) upstreamHeaders["Range"] = req.headers.range;
-
-      const upstream = await fetch(audioUrl, {
-        headers: upstreamHeaders,
-        signal: AbortSignal.timeout(30000),
-      });
-
-      if (!upstream.ok && upstream.status !== 206)
-        return res.status(502).json({ error: `Upstream returned ${upstream.status}` });
-
-      // Mirror relevant headers
-      const mirror = ["content-type", "content-length", "content-range", "accept-ranges"];
-      for (const h of mirror) {
-        const v = upstream.headers.get(h);
-        if (v) res.setHeader(h.replace(/^./, c => c.toUpperCase()).replace(/-./g, s => s.toUpperCase()), v);
-      }
-      if (!upstream.headers.get("content-type")) res.setHeader("Content-Type", "audio/mp4");
-      res.setHeader("Cache-Control", "public, max-age=3600");
-      res.status(upstream.status);
-
-      // Stream body
-      if (!upstream.body) return res.end();
-      const reader = upstream.body.getReader();
-      req.on("close", () => reader.cancel());
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) { res.end(); break; }
-        const ok = res.write(value);
-        if (!ok) await new Promise<void>(r => res.once("drain", r));
-      }
+      // Browser's <audio> element follows this redirect transparently
+      res.redirect(302, redirectUrl);
     } catch (err: any) {
-      if (!res.headersSent) res.status(502).json({ error: "Stream unavailable: " + err.message });
+      res.status(502).json({ error: "Stream unavailable: " + err.message });
     }
   });
 
