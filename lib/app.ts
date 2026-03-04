@@ -1,5 +1,5 @@
 import express from "express";
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import https from "https";
 
 // ─── Env ───────────────────────────────────────────────────────────────────────
@@ -7,7 +7,7 @@ const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID ?? "";
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET ?? "";
 
 // ─── Database (Neon serverless Postgres) ───────────────────────────────────────
-let _sql: ReturnType<typeof neon> | null = null;
+let _sql: NeonQueryFunction<false, false> | null = null;
 function getDb() {
   if (!_sql) {
     const url = process.env.DATABASE_URL;
