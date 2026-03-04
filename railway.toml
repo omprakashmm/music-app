@@ -8,6 +8,3 @@
   restartPolicyMaxRetries = 5
   healthcheckPath = "/api/songs"
   healthcheckTimeout = 300
-
-[[volumes]]
-  mountPath = "/data"
