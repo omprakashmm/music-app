@@ -247,8 +247,22 @@ export default function App() {
     setActiveView(view);
   };
 
-  const playSong = (song: Song) => {
-    setCurrentSong(song);
+  const playSong = async (song: Song) => {
+    // If the audioUrl is a /api/stream/ endpoint, resolve the real URL first
+    // so audio.src is set to the direct CDN URL (no server redirect chain).
+    let resolvedSong = song;
+    if (song.audioUrl?.startsWith('/api/stream/')) {
+      try {
+        const r = await fetch(song.audioUrl);
+        if (r.ok) {
+          const data = await r.json();
+          if (data.url) resolvedSong = { ...song, audioUrl: data.url };
+        }
+      } catch {
+        // fall through — try playing the /api/stream/ URL anyway
+      }
+    }
+    setCurrentSong(resolvedSong);
     setIsPlaying(true);
     setRecents(prev => {
       const filtered = prev.filter(s => s.id !== song.id);

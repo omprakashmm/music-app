@@ -422,22 +422,23 @@ export function createApp() {
   });
 
   // ── YouTube: audio stream ──────────────────────────────────────────────────
+  // Returns JSON { url: "..." } — the REAL audio URL the browser should play.
+  // The frontend sets audio.src directly to this URL (no server redirect chain).
   // Strategy:
-  //   1. Try Piped API — returns pipedproxy-* URLs that are NOT IP-bound.
-  //      Any browser can follow the 302 redirect and stream directly.
-  //   2. Fall back to Invidious latest_version?local=true proxy.
+  //   1. Piped API  — pipedproxy-* URLs, not IP-bound, work from any browser.
+  //   2. Invidious latest_version?local=true  — fallback proxy.
   app.get("/api/stream/:videoId", async (req, res) => {
     const { videoId } = req.params;
     if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId))
       return res.status(400).json({ error: "Invalid video ID" });
     try {
-      // ── 1. Piped (preferred) ────────────────────────────────────────────
+      // ── 1. Piped ─────────────────────────────────────────────────────────
       const pipedUrl = await pipedAudioUrl(videoId);
       if (pipedUrl) {
-        return res.redirect(302, pipedUrl);
+        return res.json({ url: pipedUrl });
       }
 
-      // ── 2. Invidious fallback ───────────────────────────────────────────
+      // ── 2. Invidious fallback ─────────────────────────────────────────────
       const info = await invidiousVideoInfo(videoId);
       const base: string = info._base;
       const formats: any[] = info.adaptiveFormats || [];
@@ -448,8 +449,8 @@ export function createApp() {
         formats.find((f: any) => f.itag === 249) ||
         formats.find((f: any) => (f.type as string)?.startsWith("audio/"));
       const itag = audioFormat?.itag ?? 140;
-      const redirectUrl = `${base}/latest_version?id=${videoId}&itag=${itag}&local=true`;
-      return res.redirect(302, redirectUrl);
+      const proxyUrl = `${base}/latest_version?id=${videoId}&itag=${itag}&local=true`;
+      return res.json({ url: proxyUrl });
     } catch (err: any) {
       res.status(502).json({ error: "Stream unavailable: " + err.message });
     }
