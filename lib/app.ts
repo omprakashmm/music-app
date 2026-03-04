@@ -431,15 +431,19 @@ export function createApp() {
   });
 
   // ── YouTube: audio stream ──────────────────────────────────────────────────
-  // Proxies audio bytes through this server with Range request support.
-  // Host on Railway (no response-size limit, no short timeout).
+  // On Vercel (serverless): returns JSON { url } — browser plays the Piped
+  //   proxy URL directly.  No response-size limit, no timeout.
+  // On Railway (persistent server): proxies bytes with Range support so
+  //   the frontend can seek and stream without touching external URLs.
   app.get("/api/stream/:videoId", async (req, res) => {
     const { videoId } = req.params;
     if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId))
       return res.status(400).json({ error: "Invalid video ID" });
+
+    // Resolve upstream audio URL via Piped (preferred) or Invidious fallback
+    let upstreamUrl: string | null = null;
     try {
-      // Resolve upstream audio URL via Piped (preferred) or Invidious fallback
-      let upstreamUrl: string | null = await pipedAudioUrl(videoId);
+      upstreamUrl = await pipedAudioUrl(videoId);
       if (!upstreamUrl) {
         const info = await invidiousVideoInfo(videoId);
         const base: string = info._base;
@@ -453,8 +457,19 @@ export function createApp() {
         const itag = audioFormat?.itag ?? 140;
         upstreamUrl = `${base}/latest_version?id=${videoId}&itag=${itag}&local=true`;
       }
+    } catch (err: any) {
+      return res.status(502).json({ error: "Stream unavailable: " + err.message });
+    }
 
-      // Fetch upstream, forwarding Range header for seek support
+    // On Vercel (no persistent connection): return the URL as JSON.
+    // The frontend resolves it and sets audio.src directly.
+    if (process.env.VERCEL) {
+      return res.json({ url: upstreamUrl });
+    }
+
+    // On Railway: pipe bytes through this server so the browser streams
+    // from a single trusted origin with Range request / seek support.
+    try {
       const upstreamHeaders: Record<string, string> = {
         "User-Agent": "Mozilla/5.0 (compatible; SonicStream/1.0)",
       };
@@ -476,7 +491,6 @@ export function createApp() {
       const cr = upstream.headers.get("content-range");
       if (cr) res.setHeader("Content-Range", cr);
 
-      // Pipe bytes with backpressure
       const reader = upstream.body.getReader();
       req.on("close", () => reader.cancel().catch(() => {}));
       while (true) {

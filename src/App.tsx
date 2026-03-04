@@ -251,11 +251,36 @@ export default function App() {
     setActiveView(view);
   };
 
-  const playSong = (song: Song) => {
-    // If audioUrl is a relative /api/ path, prefix with the backend base URL.
-    const resolvedSong = song.audioUrl?.startsWith('/api/')
-      ? { ...song, audioUrl: `${API}${song.audioUrl}` }
-      : song;
+  const playSong = async (song: Song) => {
+    // If audioUrl points to our stream endpoint, resolve the real URL first.
+    // The endpoint returns JSON { url } on Vercel so the browser plays the
+    // external Piped URL directly (no response-size limit).
+    // On Railway it pipes bytes, so we keep the stream URL as-is.
+    let resolvedSong = song;
+    const rawUrl = song.audioUrl?.startsWith('/api/')
+      ? `${API}${song.audioUrl}`
+      : song.audioUrl || '';
+    if (rawUrl.includes('/api/stream/')) {
+      try {
+        const r = await fetch(rawUrl, { headers: { 'Accept': 'application/json' } });
+        if (r.ok) {
+          const ct = r.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const data = await r.json();
+            if (data.url) resolvedSong = { ...song, audioUrl: data.url };
+          } else {
+            // Railway byte-proxy: use the stream URL directly
+            resolvedSong = { ...song, audioUrl: rawUrl };
+          }
+        } else {
+          resolvedSong = { ...song, audioUrl: rawUrl };
+        }
+      } catch {
+        resolvedSong = { ...song, audioUrl: rawUrl };
+      }
+    } else {
+      resolvedSong = { ...song, audioUrl: rawUrl };
+    }
     setCurrentSong(resolvedSong);
     setIsPlaying(true);
     setRecents(prev => {
