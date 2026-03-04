@@ -578,7 +578,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-transparent text-white overflow-hidden">
-      <audio key={currentSong?.id} ref={audioRef} src={currentSong?.audioUrl || ''} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata} onEnded={handleSongEnd} />
+      <audio key={currentSong?.id} ref={audioRef} src={currentSong?.audioUrl || ''} onTimeUpdate={handleTimeUpdate} onLoadedMetadata={handleLoadedMetadata} onEnded={handleSongEnd} onError={(e) => { const el = e.currentTarget; const code = el.error?.code; const msg = code === 4 ? 'Audio source not supported' : code === 3 ? 'Audio decode error' : code === 2 ? 'Network error loading audio' : 'Playback error'; showToast(`${msg} — try re-adding the song`, 'error'); setIsPlaying(false); }} />
 
       {/* Sidebar */}
       <AnimatePresence>

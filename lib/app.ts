@@ -115,6 +115,39 @@ const INVIDIOUS_INSTANCES = [
   "https://invidious.epicsite.xyz",
 ];
 
+// ─── Piped API (proxy URLs are NOT IP-bound — works from any browser IP) ───────
+const PIPED_API_INSTANCES = [
+  "https://pipedapi.kavin.rocks",
+  "https://pipedapi.adminforge.de",
+  "https://piped-api.garudalinux.org",
+  "https://api.piped.projectsegfau.lt",
+  "https://watchapi.whatever.social",
+];
+
+/** Return a Piped proxy audio URL for `videoId`.
+ *  These URLs go through pipedproxy-*.kavin.rocks (or similar) which is
+ *  publicly accessible — no IP-binding, works directly in <audio src>. */
+async function pipedAudioUrl(videoId: string): Promise<string | null> {
+  for (const base of PIPED_API_INSTANCES) {
+    try {
+      const data = await fetchJson(`${base}/streams/${videoId}`, 10000);
+      if (!data || data.error || !Array.isArray(data.audioStreams)) continue;
+      // Sort by bitrate desc, pick highest quality
+      const streams = [...data.audioStreams].sort(
+        (a: any, b: any) => (b.bitrate || 0) - (a.bitrate || 0)
+      );
+      const best = streams[0];
+      if (best?.url) {
+        console.log(`✅ Piped audio URL from ${base}`);
+        return best.url as string;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function fetchJson(url: string, timeoutMs = 12000): Promise<any> {
   const res = await fetch(url, {
     signal: AbortSignal.timeout(timeoutMs),
@@ -389,25 +422,24 @@ export function createApp() {
   });
 
   // ── YouTube: audio stream ──────────────────────────────────────────────────
-  // Returns a 302 redirect to a fresh Invidious audio URL.
-  // The HTML5 <audio> element follows redirects natively — no CORS headers
-  // needed, and no response-body size limits (unlike serverless proxying).
+  // Strategy:
+  //   1. Try Piped API — returns pipedproxy-* URLs that are NOT IP-bound.
+  //      Any browser can follow the 302 redirect and stream directly.
+  //   2. Fall back to Invidious latest_version?local=true proxy.
   app.get("/api/stream/:videoId", async (req, res) => {
     const { videoId } = req.params;
     if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId))
       return res.status(400).json({ error: "Invalid video ID" });
     try {
+      // ── 1. Piped (preferred) ────────────────────────────────────────────
+      const pipedUrl = await pipedAudioUrl(videoId);
+      if (pipedUrl) {
+        return res.redirect(302, pipedUrl);
+      }
+
+      // ── 2. Invidious fallback ───────────────────────────────────────────
       const info = await invidiousVideoInfo(videoId);
       const base: string = info._base;
-
-      // Always use Invidious's latest_version proxy with local=true.
-      // Direct CDN audio.url from the video metadata API is IP-bound to the
-      // Invidious server — when the browser follows the 302 redirect the CDN
-      // returns 403.  latest_version?local=true proxies through Invidious so
-      // the browser can stream it without any IP-mismatch issue.
-      //
-      // Pick the best itag: 140 (AAC 128 kbps m4a) > 251 (Opus 160 kbps) >
-      // 250 (Opus 70 kbps) > 249 (Opus 50 kbps); fall back to 140.
       const formats: any[] = info.adaptiveFormats || [];
       const audioFormat =
         formats.find((f: any) => f.itag === 140) ||
@@ -416,11 +448,8 @@ export function createApp() {
         formats.find((f: any) => f.itag === 249) ||
         formats.find((f: any) => (f.type as string)?.startsWith("audio/"));
       const itag = audioFormat?.itag ?? 140;
-
       const redirectUrl = `${base}/latest_version?id=${videoId}&itag=${itag}&local=true`;
-
-      // Browser's <audio> element follows this redirect transparently
-      res.redirect(302, redirectUrl);
+      return res.redirect(302, redirectUrl);
     } catch (err: any) {
       res.status(502).json({ error: "Stream unavailable: " + err.message });
     }
