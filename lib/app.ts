@@ -1,34 +1,28 @@
 import express from "express";
-import { createClient, type Client } from "@libsql/client";
+import { neon } from "@neondatabase/serverless";
 import https from "https";
 
 // ─── Env ───────────────────────────────────────────────────────────────────────
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID ?? "";
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET ?? "";
 
-// ─── Database (Turso / libSQL cloud SQLite) ────────────────────────────────────
-let _client: Client | null = null;
-function getDb(): Client {
-  if (!_client) {
-    const url = process.env.TURSO_DATABASE_URL;
+// ─── Database (Neon serverless Postgres) ───────────────────────────────────────
+let _sql: ReturnType<typeof neon> | null = null;
+function getDb() {
+  if (!_sql) {
+    const url = process.env.DATABASE_URL;
     if (!url)
       throw new Error(
-        "TURSO_DATABASE_URL is not set. Create a free database at https://turso.tech and add " +
-        "TURSO_DATABASE_URL and TURSO_AUTH_TOKEN to your environment variables."
+        "DATABASE_URL is not set. Add your Neon connection string to environment variables."
       );
-    _client = createClient({
-      url,
-      authToken: process.env.TURSO_AUTH_TOKEN,
-    });
+    _sql = neon(url);
   }
-  return _client;
+  return _sql;
 }
 
 export async function initDb() {
   const db = getDb();
-  // Enable foreign key enforcement (SQLite requires this per connection)
-  await db.execute("PRAGMA foreign_keys = ON");
-  await db.execute(`
+  await db`
     CREATE TABLE IF NOT EXISTS songs (
       id         TEXT PRIMARY KEY,
       title      TEXT NOT NULL,
@@ -38,23 +32,23 @@ export async function initDb() {
       duration   INTEGER DEFAULT 0,
       audio_url  TEXT NOT NULL,
       youtube_id TEXT    DEFAULT '',
-      created_at TEXT    DEFAULT (datetime('now'))
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )
-  `);
-  await db.execute(`
+  `;
+  await db`
     CREATE TABLE IF NOT EXISTS playlists (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL,
       description TEXT DEFAULT ''
     )
-  `);
-  await db.execute(`
+  `;
+  await db`
     CREATE TABLE IF NOT EXISTS playlist_songs (
       playlist_id TEXT REFERENCES playlists(id) ON DELETE CASCADE,
       song_id     TEXT REFERENCES songs(id)     ON DELETE CASCADE,
       PRIMARY KEY (playlist_id, song_id)
     )
-  `);
+  `;
 }
 
 // Row mapper: DB snake_case → JS camelCase
@@ -299,20 +293,17 @@ async function saveSong(s: {
 }) {
   const db = getDb();
   if (s.youtubeId) {
-    const { rows } = await db.execute({
-      sql: "SELECT * FROM songs WHERE youtube_id = ?",
-      args: [s.youtubeId],
-    });
+    const rows = await db`SELECT * FROM songs WHERE youtube_id = ${s.youtubeId}`;
     if (rows.length > 0) return toSong(rows[0]);
   }
   const id = genId();
   const cover = s.coverUrl || `https://picsum.photos/seed/${id}/400/400`;
-  await db.execute({
-    sql: `INSERT INTO songs (id, title, artist, album, cover_url, duration, audio_url, youtube_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    args: [id, s.title, s.artist, s.album || "Unknown Album", cover, s.duration || 0, s.audioUrl, s.youtubeId || ""],
-  });
-  const { rows } = await db.execute({ sql: "SELECT * FROM songs WHERE id = ?", args: [id] });
+  await db`
+    INSERT INTO songs (id, title, artist, album, cover_url, duration, audio_url, youtube_id)
+    VALUES (${id}, ${s.title}, ${s.artist}, ${s.album || "Unknown Album"},
+            ${cover}, ${s.duration || 0}, ${s.audioUrl}, ${s.youtubeId || ""})
+  `;
+  const rows = await db`SELECT * FROM songs WHERE id = ${id}`;
   return toSong(rows[0]);
 }
 
@@ -338,7 +329,7 @@ export function createApp() {
   // ── Songs CRUD ─────────────────────────────────────────────────────────────
   app.get("/api/songs", async (_req, res) => {
     try {
-      const { rows } = await getDb().execute("SELECT * FROM songs ORDER BY created_at");
+      const rows = await getDb()`SELECT * FROM songs ORDER BY created_at`;
       res.json(rows.map(toSong));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -360,8 +351,8 @@ export function createApp() {
   app.delete("/api/songs/:id", async (req, res) => {
     try {
       const db = getDb();
-      await db.execute({ sql: "DELETE FROM playlist_songs WHERE song_id = ?", args: [req.params.id] });
-      await db.execute({ sql: "DELETE FROM songs WHERE id = ?", args: [req.params.id] });
+      await db`DELETE FROM playlist_songs WHERE song_id = ${req.params.id}`;
+      await db`DELETE FROM songs WHERE id = ${req.params.id}`;
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -522,20 +513,19 @@ export function createApp() {
   app.get("/api/playlists", async (_req, res) => {
     try {
       const db = getDb();
-      const { rows: pls } = await db.execute("SELECT * FROM playlists");
+      const pls = await db`SELECT * FROM playlists`;
       const result = await Promise.all(
         pls.map(async (p: any) => ({
           id: p.id,
           name: p.name,
           description: p.description,
           songs: (
-            await db.execute({
-              sql: `SELECT s.* FROM songs s
-                    JOIN playlist_songs ps ON s.id = ps.song_id
-                    WHERE ps.playlist_id = ?`,
-              args: [p.id],
-            })
-          ).rows.map(toSong),
+            await db`
+              SELECT s.* FROM songs s
+              JOIN playlist_songs ps ON s.id = ps.song_id
+              WHERE ps.playlist_id = ${p.id}
+            `
+          ).map(toSong),
         }))
       );
       res.json(result);
@@ -548,12 +538,9 @@ export function createApp() {
     const { id, name, songs } = req.body;
     try {
       const db = getDb();
-      await db.execute({ sql: "INSERT INTO playlists (id, name) VALUES (?, ?)", args: [id, name] });
+      await db`INSERT INTO playlists (id, name) VALUES (${id}, ${name})`;
       for (const s of songs)
-        await db.execute({
-          sql: "INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id) VALUES (?, ?)",
-          args: [id, s.id],
-        });
+        await db`INSERT INTO playlist_songs (playlist_id, song_id) VALUES (${id}, ${s.id}) ON CONFLICT DO NOTHING`;
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -563,8 +550,8 @@ export function createApp() {
   app.delete("/api/playlists/:id", async (req, res) => {
     try {
       const db = getDb();
-      await db.execute({ sql: "DELETE FROM playlist_songs WHERE playlist_id = ?", args: [req.params.id] });
-      await db.execute({ sql: "DELETE FROM playlists WHERE id = ?", args: [req.params.id] });
+      await db`DELETE FROM playlist_songs WHERE playlist_id = ${req.params.id}`;
+      await db`DELETE FROM playlists WHERE id = ${req.params.id}`;
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -573,7 +560,7 @@ export function createApp() {
 
   app.put("/api/playlists/:id", async (req, res) => {
     try {
-      await getDb().execute({ sql: "UPDATE playlists SET name = ? WHERE id = ?", args: [req.body.name, req.params.id] });
+      await getDb()`UPDATE playlists SET name = ${req.body.name} WHERE id = ${req.params.id}`;
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -582,10 +569,11 @@ export function createApp() {
 
   app.post("/api/playlists/:id/songs", async (req, res) => {
     try {
-      await getDb().execute({
-        sql: "INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id) VALUES (?, ?)",
-        args: [req.params.id, req.body.songId],
-      });
+      await getDb()`
+        INSERT INTO playlist_songs (playlist_id, song_id)
+        VALUES (${req.params.id}, ${req.body.songId})
+        ON CONFLICT DO NOTHING
+      `;
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -594,10 +582,10 @@ export function createApp() {
 
   app.delete("/api/playlists/:id/songs/:songId", async (req, res) => {
     try {
-      await getDb().execute({
-        sql: "DELETE FROM playlist_songs WHERE playlist_id = ? AND song_id = ?",
-        args: [req.params.id, req.params.songId],
-      });
+      await getDb()`
+        DELETE FROM playlist_songs
+        WHERE playlist_id = ${req.params.id} AND song_id = ${req.params.songId}
+      `;
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

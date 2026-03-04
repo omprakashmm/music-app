@@ -9,3 +9,5 @@ coverage/
 music.db
 1772089729588-player-script.js
 1772089729601-player-script.js
+
+.env
