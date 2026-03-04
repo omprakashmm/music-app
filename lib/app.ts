@@ -400,16 +400,24 @@ export function createApp() {
       const info = await invidiousVideoInfo(videoId);
       const base: string = info._base;
 
-      // Try to get a direct adaptive-format URL (itag 140 = AAC 128 kbps m4a)
+      // Always use Invidious's latest_version proxy with local=true.
+      // Direct CDN audio.url from the video metadata API is IP-bound to the
+      // Invidious server — when the browser follows the 302 redirect the CDN
+      // returns 403.  latest_version?local=true proxies through Invidious so
+      // the browser can stream it without any IP-mismatch issue.
+      //
+      // Pick the best itag: 140 (AAC 128 kbps m4a) > 251 (Opus 160 kbps) >
+      // 250 (Opus 70 kbps) > 249 (Opus 50 kbps); fall back to 140.
       const formats: any[] = info.adaptiveFormats || [];
-      const audio =
+      const audioFormat =
         formats.find((f: any) => f.itag === 140) ||
         formats.find((f: any) => f.itag === 251) ||
+        formats.find((f: any) => f.itag === 250) ||
+        formats.find((f: any) => f.itag === 249) ||
         formats.find((f: any) => (f.type as string)?.startsWith("audio/"));
+      const itag = audioFormat?.itag ?? 140;
 
-      // Prefer direct CDN URL; fall back to Invidious latest_version proxy
-      const redirectUrl = audio?.url ||
-        `${base}/latest_version?id=${videoId}&itag=140&local=true`;
+      const redirectUrl = `${base}/latest_version?id=${videoId}&itag=${itag}&local=true`;
 
       // Browser's <audio> element follows this redirect transparently
       res.redirect(302, redirectUrl);
