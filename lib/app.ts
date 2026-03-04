@@ -345,6 +345,15 @@ export function createApp() {
   const app = express();
   app.use(express.json());
 
+  // CORS — allow any origin (Vercel frontend, local dev, etc.)
+  app.use((_req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+    if (_req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
+
   // Lazy DB-init middleware — runs once per process, idempotent on Vercel cold starts
   let dbReady = false;
   app.use("/api", async (_req, res, next) => {
@@ -422,37 +431,63 @@ export function createApp() {
   });
 
   // ── YouTube: audio stream ──────────────────────────────────────────────────
-  // Returns JSON { url: "..." } — the REAL audio URL the browser should play.
-  // The frontend sets audio.src directly to this URL (no server redirect chain).
-  // Strategy:
-  //   1. Piped API  — pipedproxy-* URLs, not IP-bound, work from any browser.
-  //   2. Invidious latest_version?local=true  — fallback proxy.
+  // Proxies audio bytes through this server with Range request support.
+  // Host on Railway (no response-size limit, no short timeout).
   app.get("/api/stream/:videoId", async (req, res) => {
     const { videoId } = req.params;
     if (!videoId || !/^[a-zA-Z0-9_-]{11}$/.test(videoId))
       return res.status(400).json({ error: "Invalid video ID" });
     try {
-      // ── 1. Piped ─────────────────────────────────────────────────────────
-      const pipedUrl = await pipedAudioUrl(videoId);
-      if (pipedUrl) {
-        return res.json({ url: pipedUrl });
+      // Resolve upstream audio URL via Piped (preferred) or Invidious fallback
+      let upstreamUrl: string | null = await pipedAudioUrl(videoId);
+      if (!upstreamUrl) {
+        const info = await invidiousVideoInfo(videoId);
+        const base: string = info._base;
+        const formats: any[] = info.adaptiveFormats || [];
+        const audioFormat =
+          formats.find((f: any) => f.itag === 140) ||
+          formats.find((f: any) => f.itag === 251) ||
+          formats.find((f: any) => f.itag === 250) ||
+          formats.find((f: any) => f.itag === 249) ||
+          formats.find((f: any) => (f.type as string)?.startsWith("audio/"));
+        const itag = audioFormat?.itag ?? 140;
+        upstreamUrl = `${base}/latest_version?id=${videoId}&itag=${itag}&local=true`;
       }
 
-      // ── 2. Invidious fallback ─────────────────────────────────────────────
-      const info = await invidiousVideoInfo(videoId);
-      const base: string = info._base;
-      const formats: any[] = info.adaptiveFormats || [];
-      const audioFormat =
-        formats.find((f: any) => f.itag === 140) ||
-        formats.find((f: any) => f.itag === 251) ||
-        formats.find((f: any) => f.itag === 250) ||
-        formats.find((f: any) => f.itag === 249) ||
-        formats.find((f: any) => (f.type as string)?.startsWith("audio/"));
-      const itag = audioFormat?.itag ?? 140;
-      const proxyUrl = `${base}/latest_version?id=${videoId}&itag=${itag}&local=true`;
-      return res.json({ url: proxyUrl });
+      // Fetch upstream, forwarding Range header for seek support
+      const upstreamHeaders: Record<string, string> = {
+        "User-Agent": "Mozilla/5.0 (compatible; SonicStream/1.0)",
+      };
+      if (req.headers.range) upstreamHeaders["Range"] = req.headers.range;
+
+      const upstream = await fetch(upstreamUrl, {
+        headers: upstreamHeaders,
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!upstream.ok || !upstream.body)
+        return res.status(502).json({ error: `Upstream returned ${upstream.status}` });
+
+      res.status(req.headers.range && upstream.status === 206 ? 206 : 200);
+      res.setHeader("Content-Type", upstream.headers.get("content-type") || "audio/mp4");
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "no-cache");
+      const cl = upstream.headers.get("content-length");
+      if (cl) res.setHeader("Content-Length", cl);
+      const cr = upstream.headers.get("content-range");
+      if (cr) res.setHeader("Content-Range", cr);
+
+      // Pipe bytes with backpressure
+      const reader = upstream.body.getReader();
+      req.on("close", () => reader.cancel().catch(() => {}));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) { res.end(); break; }
+        const ok = res.write(value);
+        if (!ok) await new Promise<void>(resolve => res.once("drain", resolve));
+      }
     } catch (err: any) {
-      res.status(502).json({ error: "Stream unavailable: " + err.message });
+      if (!res.headersSent)
+        res.status(502).json({ error: "Stream unavailable: " + err.message });
     }
   });
 

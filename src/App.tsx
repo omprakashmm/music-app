@@ -58,6 +58,10 @@ import {
 } from 'lucide-react';
 import { ViewType, Song } from './types';
 
+// Backend base URL — set VITE_API_URL on Vercel to point to your Railway backend.
+// Leave blank when frontend and backend are served from the same origin (Railway).
+const API = (import.meta.env.VITE_API_URL ?? '').replace(/\/$/, '');
+
 // Toast Notification
 function Toast({ message, type }: { message: string, type: 'success' | 'error' | 'info' }) {
   const bg = type === 'success' ? 'bg-emerald-500' : type === 'error' ? 'bg-rose-500' : 'bg-zinc-700';
@@ -119,7 +123,7 @@ export default function App() {
 
   const importPlaylist = async (type: 'youtube' | 'spotify', url: string) => {
     setImportProgress({ active: true, type, current: 0, total: 0, track: '', songs: [], error: '', done: false });
-    const endpoint = type === 'youtube' ? '/api/import/youtube-playlist' : '/api/import/spotify-playlist';
+    const endpoint = type === 'youtube' ? `${API}/api/import/youtube-playlist` : `${API}/api/import/spotify-playlist`;
     try {
       const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
       if (!res.body) throw new Error('No response body');
@@ -206,7 +210,7 @@ export default function App() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const songsRes = await fetch('/api/songs');
+        const songsRes = await fetch(`${API}/api/songs`);
         if (!songsRes.ok) throw new Error(`Songs fetch failed: ${songsRes.status}`);
         const ct = songsRes.headers.get('content-type') || '';
         if (!ct.includes('application/json')) throw new Error('Invalid response type for /api/songs');
@@ -217,7 +221,7 @@ export default function App() {
           setQueue(songsData);
         }
 
-        const playlistsRes = await fetch('/api/playlists');
+        const playlistsRes = await fetch(`${API}/api/playlists`);
         if (!playlistsRes.ok) return;
         const plData = await playlistsRes.json();
         setPlaylists(plData);
@@ -247,21 +251,11 @@ export default function App() {
     setActiveView(view);
   };
 
-  const playSong = async (song: Song) => {
-    // If the audioUrl is a /api/stream/ endpoint, resolve the real URL first
-    // so audio.src is set to the direct CDN URL (no server redirect chain).
-    let resolvedSong = song;
-    if (song.audioUrl?.startsWith('/api/stream/')) {
-      try {
-        const r = await fetch(song.audioUrl);
-        if (r.ok) {
-          const data = await r.json();
-          if (data.url) resolvedSong = { ...song, audioUrl: data.url };
-        }
-      } catch {
-        // fall through — try playing the /api/stream/ URL anyway
-      }
-    }
+  const playSong = (song: Song) => {
+    // If audioUrl is a relative /api/ path, prefix with the backend base URL.
+    const resolvedSong = song.audioUrl?.startsWith('/api/')
+      ? { ...song, audioUrl: `${API}${song.audioUrl}` }
+      : song;
     setCurrentSong(resolvedSong);
     setIsPlaying(true);
     setRecents(prev => {
@@ -345,7 +339,7 @@ export default function App() {
 
   const addNewSong = async (song: { title: string, artist: string, album: string, audioUrl: string, coverUrl: string, youtubeId?: string }) => {
     try {
-      const res = await fetch('/api/songs', {
+      const res = await fetch(`${API}/api/songs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(song)
@@ -363,7 +357,7 @@ export default function App() {
 
   const deleteSong = async (id: string) => {
     try {
-      await fetch(`/api/songs/${id}`, { method: 'DELETE' });
+      await fetch(`${API}/api/songs/${id}`, { method: 'DELETE' });
       setAllSongs(prev => prev.filter(s => s.id !== id));
       setQueue(prev => prev.filter(s => s.id !== id));
       if (currentSong?.id === id) { setCurrentSong(null); setIsPlaying(false); }
@@ -381,7 +375,7 @@ export default function App() {
 
   const addToPlaylist = async (playlistId: string, song: Song) => {
     try {
-      await fetch(`/api/playlists/${playlistId}/songs`, {
+      await fetch(`${API}/api/playlists/${playlistId}/songs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ songId: song.id })
@@ -398,7 +392,7 @@ export default function App() {
 
   const updatePlaylistName = async (id: string, newName: string) => {
     try {
-      await fetch(`/api/playlists/${id}`, {
+      await fetch(`${API}/api/playlists/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newName })
@@ -411,7 +405,7 @@ export default function App() {
 
   const removeSongFromPlaylist = async (playlistId: string, songId: string) => {
     try {
-      await fetch(`/api/playlists/${playlistId}/songs/${songId}`, {
+      await fetch(`${API}/api/playlists/${playlistId}/songs/${songId}`, {
         method: 'DELETE'
       });
       setPlaylists(prev => prev.map(p =>
@@ -443,7 +437,7 @@ export default function App() {
       songs: selectedSongs
     };
     try {
-      await fetch('/api/playlists', {
+      await fetch(`${API}/api/playlists`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newPlaylist)
@@ -2525,7 +2519,7 @@ function AddSongModal({ onClose, onAdd, onImportPlaylist }: {
     if (!ytUrl.trim()) return;
     setYtLoading(true); setYtError(''); setYtInfo(null);
     try {
-      const res = await fetch('/api/youtube/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: ytUrl.trim() }) });
+      const res = await fetch(`${API}/api/youtube/info`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: ytUrl.trim() }) });
       const text = await res.text();
       if (!text) throw new Error('Empty response');
       let data: any; try { data = JSON.parse(text); } catch { throw new Error('Invalid response'); }
