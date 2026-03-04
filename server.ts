@@ -527,7 +527,20 @@ async function startServer() {
     app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "dist", "index.html")));
   }
 
-  app.listen(PORT, "0.0.0.0", () => console.log(`🎵 SonicStream running on http://localhost:${PORT}`));
+  const server = app.listen(PORT, "0.0.0.0", () => console.log(`🎵 SonicStream running on http://localhost:${PORT}`));
+
+  // Graceful shutdown: close HTTP server then DB before exiting
+  function shutdown(signal: string) {
+    console.log(`${signal} received – shutting down gracefully`);
+    server.close(() => {
+      db.close();
+      process.exit(0);
+    });
+    // Force-exit after 10 s if connections are stuck
+    setTimeout(() => process.exit(1), 10_000).unref();
+  }
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT",  () => shutdown("SIGINT"));
 }
 
 startServer();

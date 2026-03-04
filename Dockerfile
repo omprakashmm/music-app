@@ -32,6 +32,7 @@ RUN mkdir -p /data
 # ── Runtime ────────────────────────────────────────────────────────────────────
 ENV NODE_ENV=production
 ENV DB_PATH=/data/music.db
-EXPOSE 3000
+EXPOSE 8080
 
-CMD ["npx", "tsx", "server.ts"]
+# Run tsx directly (not via npx/npm) so SIGTERM reaches the process correctly
+CMD ["node_modules/.bin/tsx", "server.ts"]
